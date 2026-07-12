@@ -1,0 +1,35 @@
+# Core ML
+numpy>=1.26
+pandas>=2.1
+scikit-learn>=1.4
+xgboost>=2.0
+scipy>=1.11
+
+# Documents / imaging
+Pillow>=10.0
+Jinja2>=3.1
+pytesseract>=0.3.10   # requires the tesseract binary on PATH; ml.ocr degrades gracefully without it
+pdf2image>=1.17       # requires poppler; only needed for real PDF ingestion
+
+# Backend
+Django>=5.0
+djangorestframework>=3.15
+celery>=5.3
+redis>=5.0
+django-cors-headers>=4.3
+
+# Model server
+fastapi>=0.110
+uvicorn>=0.29
+onnx>=1.16; python_version < "3.13"
+onnxruntime>=1.17
+
+# Experiment tracking
+mlflow>=2.12
+
+# Deep learning (Tier 2/3) — install separately if you want the BiLSTM/CNN tiers:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# ml.models_bilstm imports torch lazily and raises a clear error if missing.
+
+# Dev
+pytest>=8.0

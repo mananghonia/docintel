@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+db.sqlite3
+data/raw/
+data/synthetic/
+data/models/
+mlruns/
+node_modules/
+frontend/dist/
+.env
+*.onnx
+*.pt

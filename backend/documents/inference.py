@@ -1,0 +1,140 @@
+"""Prediction glue for the backend.
+
+Order of preference:
+1. Remote model server (MODEL_SERVER_URL set) — production path.
+2. In-process champion model loaded from MODEL_DIR (joblib bundle written
+   by training) — dev/worker path.
+3. Rule baseline — always works, day-one path.
+
+All three return the same shape: (tags, probs) with probs (n_tokens, NUM_TAGS).
+"""
+
+from __future__ import annotations
+
+import json
+from functools import lru_cache
+from pathlib import Path
+
+import numpy as np
+from django.conf import settings
+
+from ml.labeling import Document, ID2TAG, NUM_TAGS, TAG2ID
+
+CHAMPION_BUNDLE = "champion.joblib"
+
+
+@lru_cache(maxsize=1)
+def _load_champion(cache_key: str):
+    """cache_key = file mtime string, so promotion invalidates the cache."""
+    import joblib
+
+    return joblib.load(Path(settings.MODEL_DIR) / CHAMPION_BUNDLE)
+
+
+def champion_available() -> bool:
+    return (Path(settings.MODEL_DIR) / CHAMPION_BUNDLE).exists()
+
+
+def predict_document(doc: Document) -> tuple[list[str], np.ndarray, str]:
+    """Returns (tags, probs, engine): engine in {remote, champion, baseline}."""
+    if settings.MODEL_SERVER_URL:
+        return _predict_remote(doc)
+    if champion_available():
+        return _predict_champion(doc)
+    return _predict_baseline(doc)
+
+
+def _predict_baseline(doc: Document):
+    from ml.baseline import predict as baseline_predict
+
+    tags = baseline_predict(doc)
+    # Rules have no probabilities; use a flat, deliberately modest confidence
+    # so everything routes to review until a learned champion exists.
+    probs = np.full((len(tags), NUM_TAGS), 0.0, dtype=np.float32)
+    for i, t in enumerate(tags):
+        probs[i, TAG2ID[t]] = 0.75
+    return tags, probs, "baseline"
+
+
+def _predict_champion(doc: Document):
+    from ml.calibration import probs_to_logits
+    from ml.features import featurize_document
+
+    path = Path(settings.MODEL_DIR) / CHAMPION_BUNDLE
+    bundle = _load_champion(str(path.stat().st_mtime_ns))
+    model, scaler = bundle["model"], bundle.get("scaler")
+
+    X = featurize_document(doc)
+    raw = model.predict_proba(X)
+    if scaler is not None:
+        raw = scaler.transform(probs_to_logits(raw))
+    # Columns follow model.classes_ (original tag ids); expand to full space.
+    probs = np.zeros((raw.shape[0], NUM_TAGS), dtype=np.float64)
+    for j, c in enumerate(model.classes_):
+        probs[:, int(c)] = raw[:, j]
+    tags = [ID2TAG[int(i)] for i in probs.argmax(axis=1)]
+    return tags, probs, f"champion:{bundle.get('version', '?')}"
+
+
+def _predict_remote(doc: Document):
+    import urllib.request
+
+    req = urllib.request.Request(
+        settings.MODEL_SERVER_URL.rstrip("/") + "/predict",
+        data=json.dumps({"document": doc.to_dict()}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        payload = json.loads(resp.read())
+    return (payload["tags"], np.asarray(payload["probs"]),
+            f"remote:{payload.get('model_version', '?')}")
+
+
+# ---------------------------------------------------------------------------
+# tags+probs -> reviewable field list
+# ---------------------------------------------------------------------------
+
+def build_fields(doc: Document, tags: list[str], probs: np.ndarray) -> list[dict]:
+    """Group tagged tokens into field spans with value, confidence and bbox,
+    then run business-rule postprocessing on values and confidences."""
+    from ml.labeling import tag_field
+    from ml.postprocess import postprocess_fields
+
+    spans: dict[str, dict] = {}
+    current: str | None = None
+    for i, (tok, tag) in enumerate(zip(doc.tokens, tags)):
+        f = tag_field(tag)
+        if f is None:
+            current = None
+            continue
+        fresh = tag.startswith("B-") or f != current
+        if fresh and f in spans:
+            current = None
+            continue  # keep first span only
+        if fresh:
+            spans[f] = {"tokens": [], "confs": [], "page": tok.page}
+        current = f
+        spans[f]["tokens"].append(tok)
+        spans[f]["confs"].append(float(probs[i].max()))
+
+    values = {f: " ".join(t.text for t in s["tokens"]) for f, s in spans.items()}
+    confs = {f: float(np.mean(s["confs"])) for f, s in spans.items()}
+    processed = postprocess_fields(values, confs)
+
+    fields = []
+    for f, s in spans.items():
+        toks = s["tokens"]
+        p = processed[f]
+        fields.append({
+            "field": f,
+            "raw": p["raw"],
+            "value": p["value"],
+            "confidence": round(p["confidence"], 4),
+            "flags": p["flags"],
+            "bbox": {
+                "x0": min(t.x0 for t in toks), "y0": min(t.y0 for t in toks),
+                "x1": max(t.x1 for t in toks), "y1": max(t.y1 for t in toks),
+                "page": s["page"],
+            },
+        })
+    return fields

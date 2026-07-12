@@ -1,0 +1,78 @@
+version: "3.9"
+
+x-backend-env: &backend-env
+  POSTGRES_HOST: postgres
+  POSTGRES_DB: docintel
+  POSTGRES_USER: docintel
+  POSTGRES_PASSWORD: docintel
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/1
+  MODEL_SERVER_URL: http://model-server:8001
+  MODEL_DIR: /models
+  MEDIA_ROOT: /media
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: docintel
+      POSTGRES_USER: docintel
+      POSTGRES_PASSWORD: docintel
+    volumes: [pgdata:/var/lib/postgresql/data]
+
+  redis:
+    image: redis:7-alpine
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: docintel
+      MINIO_ROOT_PASSWORD: docintel123
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [miniodata:/data]
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    command: mlflow server --host 0.0.0.0 --port 5000
+    ports: ["5000:5000"]
+    volumes: [mlflowdata:/mlflow]
+
+  backend:
+    build: { context: ., dockerfile: backend/Dockerfile }
+    command: sh -c "python backend/manage.py migrate && python backend/manage.py runserver 0.0.0.0:8000"
+    environment: *backend-env
+    volumes: [models:/models, media:/media]
+    ports: ["8000:8000"]
+    depends_on: [postgres, redis, model-server]
+
+  worker:
+    build: { context: ., dockerfile: backend/Dockerfile }
+    command: sh -c "cd backend && celery -A config worker -l info"
+    environment: *backend-env
+    volumes: [models:/models, media:/media]
+    depends_on: [postgres, redis]
+
+  beat:
+    build: { context: ., dockerfile: backend/Dockerfile }
+    command: sh -c "cd backend && celery -A config beat -l info"
+    environment: *backend-env
+    depends_on: [postgres, redis]
+
+  model-server:
+    build: { context: ., dockerfile: model_server/Dockerfile }
+    environment: { MODEL_DIR: /models }
+    volumes: [models:/models]
+    ports: ["8001:8001"]
+
+  frontend:
+    build: { context: frontend }
+    ports: ["5173:80"]
+    depends_on: [backend]
+
+volumes:
+  pgdata:
+  miniodata:
+  mlflowdata:
+  models:
+  media:
