@@ -14,3 +14,4 @@ frontend/dist/
 .env
 *.onnx
 *.pt
+data/labeled/

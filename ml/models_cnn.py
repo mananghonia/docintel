@@ -54,12 +54,14 @@ class VisualSequenceTagger:
     exactly comparable to Tier 2 under the same training loop."""
 
     def __init__(self, use_visual: bool = True, hidden: int = 128,
-                 lr: float = 1e-3, epochs: int = 12, device: str | None = None):
+                 lr: float = 1e-3, epochs: int = 12, device: str | None = None,
+                 seed: int | None = None):
         self.use_visual = use_visual
         self.hidden = hidden
         self.lr = lr
         self.epochs = epochs
         self.device = device
+        self.seed = seed
         self._net = None
 
     def _build(self, n_features: int, torch):
@@ -108,6 +110,9 @@ class VisualSequenceTagger:
         torch = _require_torch()
         import torch.nn as nn
 
+        if self.seed is not None:
+            torch.manual_seed(self.seed)
+            np.random.seed(self.seed)
         device = self.device or "cpu"
         data = [self._tensors(d, torch) for d in docs if d.tokens]
         n_features = data[0][0].shape[1]
@@ -151,16 +156,23 @@ class VisualSequenceTagger:
 
 
 def run_visual_ablation(train_docs: list[Document], test_docs: list[Document],
-                        epochs: int = 8) -> dict[str, float]:
-    """Tier 2 (BiLSTM) vs Tier 3 (BiLSTM+CNN), same budget. Field-F1 each."""
+                        epochs: int = 8, seeds: tuple = (0, 1, 2)) -> dict[str, dict]:
+    """Tier 2 (BiLSTM) vs Tier 3 (BiLSTM+CNN), same budget, mean±std over
+    seeds — single-seed gaps at this corpus size are init noise."""
     from ml.evaluate import evaluate_field_extraction
 
-    results: dict[str, float] = {}
+    results: dict[str, dict] = {}
     for use_visual in (False, True):
         name = "bilstm+cnn" if use_visual else "bilstm"
-        tagger = VisualSequenceTagger(use_visual=use_visual, epochs=epochs)
-        tagger.fit(train_docs, verbose=False)
-        tag_lists = [tagger.predict_tags(d) for d in test_docs]
-        results[name] = evaluate_field_extraction(test_docs, tag_lists).macro_f1()
-        print(f"{name:>12}: field-F1 {results[name]:.3f}")
+        f1s = []
+        for seed in seeds:
+            tagger = VisualSequenceTagger(use_visual=use_visual, epochs=epochs,
+                                          seed=seed)
+            tagger.fit(train_docs, verbose=False)
+            tag_lists = [tagger.predict_tags(d) for d in test_docs]
+            f1s.append(evaluate_field_extraction(test_docs, tag_lists).macro_f1())
+        results[name] = {"mean": float(np.mean(f1s)), "std": float(np.std(f1s)),
+                         "runs": f1s}
+        print(f"{name:>12}: field-F1 {np.mean(f1s):.3f}±{np.std(f1s):.3f}  "
+              f"({' '.join(f'{f:.3f}' for f in f1s)})")
     return results

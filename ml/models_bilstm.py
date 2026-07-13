@@ -54,13 +54,15 @@ class SequenceTagger:
     comparison isolates the recurrence architecture."""
 
     def __init__(self, rnn_type: str = "bilstm", hidden: int = 128,
-                 lr: float = 1e-3, epochs: int = 12, device: str | None = None):
+                 lr: float = 1e-3, epochs: int = 12, device: str | None = None,
+                 seed: int | None = None):
         assert rnn_type in ("rnn", "lstm", "bilstm")
         self.rnn_type = rnn_type
         self.hidden = hidden
         self.lr = lr
         self.epochs = epochs
         self.device = device
+        self.seed = seed
         self._net = None
 
     def _build(self, n_features: int, torch):
@@ -91,6 +93,9 @@ class SequenceTagger:
         torch = _require_torch()
         import torch.nn as nn
 
+        if self.seed is not None:
+            torch.manual_seed(self.seed)
+            np.random.seed(self.seed)
         device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
         data = [_doc_tensors(d, torch) for d in docs if d.tokens]
         n_features = data[0][0].shape[1]
@@ -155,16 +160,27 @@ class SequenceTagger:
 
 
 def run_ablation(train_docs: list[Document], test_docs: list[Document],
-                 epochs: int = 10) -> dict[str, float]:
-    """RNN vs LSTM vs BiLSTM, identical data/budget. Returns field-F1 each."""
+                 epochs: int = 10, seeds: tuple = (0, 1, 2)) -> dict[str, dict]:
+    """RNN vs LSTM vs BiLSTM, identical data/budget, mean±std over seeds.
+
+    Multi-seed is not optional: on a few-hundred-doc corpus, single-seed
+    differences of ±0.02 field-F1 are init noise, and a single run will
+    happily 'show' whichever architecture got the luckiest seed.
+    """
+    import numpy as np
+
     from ml.evaluate import evaluate_field_extraction
 
-    results: dict[str, float] = {}
+    results: dict[str, dict] = {}
     for rnn_type in ("rnn", "lstm", "bilstm"):
-        tagger = SequenceTagger(rnn_type=rnn_type, epochs=epochs)
-        tagger.fit(train_docs, verbose=False)
-        tag_lists = [tagger.predict_tags(d) for d in test_docs]
-        f1 = evaluate_field_extraction(test_docs, tag_lists).macro_f1()
-        results[rnn_type] = f1
-        print(f"{rnn_type:>8}: field-F1 {f1:.3f}")
+        f1s = []
+        for seed in seeds:
+            tagger = SequenceTagger(rnn_type=rnn_type, epochs=epochs, seed=seed)
+            tagger.fit(train_docs, verbose=False)
+            tag_lists = [tagger.predict_tags(d) for d in test_docs]
+            f1s.append(evaluate_field_extraction(test_docs, tag_lists).macro_f1())
+        results[rnn_type] = {"mean": float(np.mean(f1s)), "std": float(np.std(f1s)),
+                             "runs": f1s}
+        print(f"{rnn_type:>8}: field-F1 {np.mean(f1s):.3f}±{np.std(f1s):.3f}  "
+              f"({' '.join(f'{f:.3f}' for f in f1s)})")
     return results

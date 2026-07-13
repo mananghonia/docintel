@@ -354,10 +354,12 @@ def generate_document(seed: int | None = None, hard: bool = False) -> Document:
                      "invoice_number", style.labels_above)
     meta_y = page.kv(lab("invoice_date"), inv_date.strftime(style.date_fmt),
                      meta_x, meta_y, "invoice_date", style.labels_above)
-    if rng.random() < style.p_due:
+    has_due = rng.random() < style.p_due
+    if has_due:
         meta_y = page.kv(lab("due_date"), due_date.strftime(style.date_fmt),
                          meta_x, meta_y, "due_date", style.labels_above)
-    if rng.random() < style.p_po:
+    has_po = rng.random() < style.p_po
+    if has_po:
         meta_y = page.kv(lab("po_number"), po_no, meta_x, meta_y,
                          "po_number", style.labels_above)
     # Distractors right in the meta block, where they hurt most.
@@ -412,10 +414,13 @@ def generate_document(seed: int | None = None, hard: bool = False) -> Document:
         meta={
             "source": "synthetic-hard" if hard else "synthetic",
             "family": style.family,
+            # Truth contains ONLY fields actually rendered on the page: a
+            # model cannot extract what isn't printed, and truth entries for
+            # unprinted fields silently deflate recall for every model.
             "truth": {
                 "invoice_number": inv_no,
                 "invoice_date": inv_date.isoformat(),
-                "due_date": due_date.isoformat(),
+                **({"due_date": due_date.isoformat()} if has_due else {}),
                 "vendor_name": vendor,
                 "vendor_gstin": vendor_gstin,
                 "buyer_name": buyer,
@@ -424,7 +429,7 @@ def generate_document(seed: int | None = None, hard: bool = False) -> Document:
                 "tax_amount": tax,
                 "total_amount": total,
                 "currency": currency,
-                "po_number": po_no,
+                **({"po_number": po_no} if has_po else {}),
             },
         },
     )

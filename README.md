@@ -46,7 +46,7 @@ python scripts/backend_e2e.py
 
 # 3. Run the app
 cd backend && python manage.py migrate && python manage.py runserver   # :8000
-cd frontend && npm install && npm run dev                              # :5173
+cd frontend && npm install && npm run dev                              # :5174
 ```
 
 Without a Redis broker configured, Celery runs tasks eagerly in-process —
@@ -79,32 +79,45 @@ saturates ≥0.94 F1 and comparisons are meaningless.
 
 | Tier | Model | Field F1 |
 |------|-------|----------|
-| 0 | Regex + keyword anchors | 0.37 (0.72 on easy data — anchors shatter) |
-| 1 | Naive Bayes | 0.53 |
-| 1 | KNN | 0.73 |
-| 1 | XGBoost / LogReg / LinearSVM | 0.77 |
-| 1 | Random Forest | 0.81 |
-| 2 | vanilla RNN | 0.74 |
-| 2 | LSTM | 0.73 |
-| 2 | **BiLSTM** | **0.77** |
-| 3 | **BiLSTM + CNN visual stream** | **0.78** |
+| 0 | Regex + keyword anchors | 0.38 (0.73 on easy data — anchors shatter) |
+| 1 | Naive Bayes | 0.56 |
+| 1 | KNN | 0.78 |
+| 1 | XGBoost / LogReg / LinearSVM | 0.81–0.82 |
+| 1 | Random Forest | **0.86** |
+| 2 | vanilla RNN | 0.794 ± 0.015 (3 seeds) |
+| 2 | LSTM | 0.804 ± 0.009 |
+| 2 | BiLSTM | 0.793 ± 0.024 |
+| 3 | BiLSTM + CNN visual stream | 0.821 ± 0.041 (vs 0.834 ± 0.034 without CNN, same setup) |
 
-Reading the table honestly: Tier 1 models receive hand-engineered context
-(±2-token window, keyword-anchor distances); Tier 2/3 receive **context-free
-per-token features only** and must learn context through recurrence. The
-BiLSTM matching XGBoost while learning its own context — and the visual
-stream adding +2.7 points on top — is the point. (First lesson learned the
-hard way: feeding the context window TO the sequence models made the
-RNN/LSTM/BiLSTM comparison completely flat; the architecture only matters
-when it has a job to do.)
+Reading the table honestly — this experiment taught two lessons the hard way:
+
+1. **Feature design shapes what an ablation can measure.** Tier 1 models get
+   hand-engineered context (±2-token window, keyword-anchor distances);
+   Tier 2/3 get context-free per-token features and must learn context
+   through recurrence — otherwise the RNN comparison measures nothing.
+2. **Single-seed neural comparisons lie.** The first single-seed run "showed"
+   BiLSTM beating RNN by 3 points and the CNN adding 2.7 more. Re-run over
+   3 seeds, every architecture gap collapsed inside the noise band
+   (RNN ≈ LSTM ≈ BiLSTM; CNN gain not measurable on clean synthetic
+   renders). At a few-hundred-document scale, **Random Forest on engineered
+   features beats every neural model here** — sequence models need more
+   data than this to pay for themselves, and any claimed neural win without
+   seed variance is a coin flip wearing a lab coat.
+
+The sequence models do learn context (0.79–0.80 with context-free input vs
+0.56 for the also-context-free Naive Bayes), they just don't beat
+hand-engineered context at this data size. On real-scale data (thousands of
+docs, real scan artifacts) the expected ordering may flip — that experiment
+is wired and waiting for data.
 
 **Active learning** (XGBoost, seed 20 docs, batch 10): random sampling
-plateaus at ~0.70 after 100 labels; least-confidence reaches the same F1
-with ~50 — **half the labeling budget**. Margin+diversity *underperforms*
-plain margin on this data: with only 8 layout families, KMeans-forced
-cluster coverage wastes budget on already-easy templates. Diversity should
-pay off when layouts number in the hundreds (real vendors), and the
-simulation exists to test exactly that once real data lands.
+plateaus at ~0.74 after 100 labels; least-confidence reaches that same F1
+with ~40 labels — **60% less labeling budget** — and keeps climbing to 0.80.
+Margin+diversity *underperforms* plain margin on this data: with only 8
+layout families, KMeans-forced cluster coverage wastes budget on
+already-easy templates. Diversity should pay off when layouts number in
+the hundreds (real vendors), and the simulation exists to test exactly
+that once real data lands.
 
 **Serving** (BiLSTM, single CPU thread, per document):
 
@@ -148,6 +161,29 @@ binarises internally, so preprocessing now only does autocontrast + deskew.
 
 To label your own invoices, the review UI is the tool: upload, correct,
 then `python scripts/import_real.py export-verified`.
+(CORD JSONs are not committed — CC BY-NC-SA license — rerun the importer.)
+
+## Failure modes, named
+
+Every one of these was hit for real during development, not imagined:
+
+| Failure | Symptom | Mitigation |
+|---------|---------|------------|
+| OOD documents | US receipt → `vendor_name="Receipt"` at 1.00 confidence, auto-accepted | critical-field gate: no total/invoice number → review regardless of confidence; PSI drift alert fired correctly |
+| OCR value corruption | `total=1019067.69` read as `1.0` | unfixable downstream; arithmetic check flags it, reviewer corrects |
+| Overzealous preprocessing | binarise+median destroyed thin strokes, 65 tokens → 6 | measured, removed; tesseract binarises internally |
+| Anchor dropout | faint print eats the "Total:" label, rules find nothing | learned models key on many signals; rules baseline honestly collapses (0.73 → 0.38) |
+| Truth for unprinted fields | generator claimed due_date even when not rendered → recall deflated for every model | caught by the test suite; truth now only contains rendered fields |
+| Split leakage | token-level splits leak layout, inflate F1 ~10 pts | GroupKFold by document is the only split the harness offers |
+
+Not yet handled (would be next): handwriting, stamps/watermarks over text,
+multi-page invoices with carried-over totals, rotated scans beyond ±4°.
+
+## Tests
+
+```bash
+python -m pytest tests -q     # 19 tests: alignment, GSTIN, calibration, eval logic
+```
 
 `--real DIR` mixes in hand-labeled real documents (Document-dict JSONs);
 evaluation then becomes **real-only** — synthetic-only models shatter on
