@@ -40,7 +40,15 @@ def process_document(doc_id: str) -> str:
         fields = build_fields(doc, tags, probs)
 
         confs = [f["confidence"] for f in fields] or [0.0]
+        # Confidence alone cannot gate review: on out-of-distribution input
+        # (a US receipt hitting a model trained on GST invoices) softmax is
+        # confidently wrong. A document with no total or no invoice number
+        # is either not an invoice or a failed extraction — a human looks
+        # at it regardless of what the model believes.
+        found = {f["field"] for f in fields}
+        missing_critical = {"invoice_number", "total_amount"} - found
         needs_review = (min(confs) < settings.CONFIDENCE_REVIEW_THRESHOLD
+                        or bool(missing_critical)
                         or not fields)
         Extraction.objects.create(
             document=record,

@@ -99,10 +99,19 @@ def ocr_image(img: Image.Image, doc_id: str | None = None,
 
 
 def ocr_pdf(path: str, doc_id: str | None = None, dpi: int = 150) -> Document:
-    """OCR every page of a PDF into one Document (requires pdf2image+poppler)."""
-    from pdf2image import convert_from_path
+    """OCR every page of a PDF into one Document.
 
-    pages = convert_from_path(path, dpi=dpi)
+    Rendered with PyMuPDF (pure pip install) rather than pdf2image, which
+    needs the poppler system binary — a real deployment obstacle on Windows.
+    """
+    import fitz  # PyMuPDF
+
+    zoom = dpi / 72.0
+    pages = []
+    with fitz.open(path) as pdf:
+        for page in pdf:
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+            pages.append(Image.frombytes("RGB", (pix.width, pix.height), pix.samples))
     if not pages:
         raise ValueError(f"No pages rendered from {path}")
     docs = [ocr_image(img, page=i) for i, img in enumerate(pages)]
