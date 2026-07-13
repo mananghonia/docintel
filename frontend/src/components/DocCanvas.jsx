@@ -48,11 +48,28 @@ export default function DocCanvas({ docJson, fields, hovered, onHover, drawTarge
       onMouseDown={down} onMouseMove={move} onMouseUp={up}
     >
       <rect width={W} height={H} fill="#fff" />
-      {tokens.map((t, i) => (
-        <text key={i} x={t.x0} y={t.y1} fontSize={16} fontFamily="monospace" fill="#1e293b">
-          {t.text}
-        </text>
-      ))}
+      {tokens.map((t, i) => {
+        // Scale each glyph to its OCR bounding box instead of a fixed size:
+        // a fixed 16px font turns a dense page (1000+ small tokens) into an
+        // overlapping smear. textLength + spacingAndGlyphs squeezes each word
+        // to exactly its box width so nothing bleeds into its neighbour.
+        const w = Math.max(t.x1 - t.x0, 1);
+        const h = Math.max(t.y1 - t.y0, 1);
+        return (
+          <text
+            key={i}
+            x={t.x0}
+            y={t.y1 - h * 0.18}
+            fontSize={Math.min(Math.max(h, 4), 40)}
+            textLength={w}
+            lengthAdjust="spacingAndGlyphs"
+            fontFamily="sans-serif"
+            fill="#1e293b"
+          >
+            {t.text}
+          </text>
+        );
+      })}
       {(fields ?? []).map((f) => (
         <rect
           key={f.field}
