@@ -11,7 +11,7 @@ from __future__ import annotations
 import shutil
 import uuid
 
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageOps
 
 from ml.labeling import Document, Token
 
@@ -48,16 +48,15 @@ def _estimate_skew(img: Image.Image, max_angle: float = 4.0, step: float = 0.5) 
 
 
 def preprocess(img: Image.Image, deskew: bool = True) -> Image.Image:
-    """Grayscale, autocontrast, light denoise, adaptive-ish binarise, deskew."""
+    """Grayscale, autocontrast, deskew. Deliberately NO binarisation or
+    median filtering: tesseract binarises internally with adaptive Otsu, and
+    a fixed global threshold + median erosion destroys thin/anti-aliased
+    strokes (measured: 65 tokens -> 6 on a blurred scan)."""
     g = ImageOps.autocontrast(img.convert("L"))
-    g = g.filter(ImageFilter.MedianFilter(3))
     if deskew:
         angle = _estimate_skew(g)
         if angle:
             g = g.rotate(angle, fillcolor=255, resample=Image.BILINEAR)
-    # Global Otsu-like threshold via point(); tesseract also binarises
-    # internally, so this mainly helps the visual tier and skew estimate.
-    g = g.point(lambda p: 255 if p > 160 else 0)
     return g
 
 

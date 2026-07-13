@@ -65,11 +65,45 @@ def cmd_visual(args):
     run_visual_ablation(docs[n_test:], docs[:n_test], epochs=args.epochs)
 
 
+def cmd_gap(args):
+    """The synthetic-vs-real gap: three training regimes, one REAL test set.
+    Requires --real. This is the experiment behind 'synthetic-only models
+    shatter on reality'."""
+    from ml.evaluate import evaluate_field_extraction
+    from ml.features import featurize_dataset, featurize_document
+    from ml.labeling import ID2TAG
+    from ml.models_classical import make_models
+
+    synth, real = load_docs(args)
+    if not real:
+        sys.exit("gap needs --real DIR")
+    n_test = max(len(real) // 3, 1)
+    test, real_train = real[:n_test], real[n_test:]
+
+    regimes = {
+        "synthetic_only": synth,
+        "synth+real": synth + real_train,
+        "real_only": real_train,
+    }
+    for name, train in regimes.items():
+        X, y, _ = featurize_dataset(train)
+        model = make_models(fast=True)["xgboost"]
+        model.fit(X, y)
+        tag_lists = [[ID2TAG[int(p)] for p in model.predict(featurize_document(d))]
+                     for d in test]
+        scores = evaluate_field_extraction(test, tag_lists)
+        per = scores.per_field()
+        detail = "  ".join(f"{f}={m['f1']:.2f}" for f, m in sorted(per.items()))
+        print(f"{name:>15}: macro-F1 {scores.macro_f1():.3f}   {detail}")
+
+
 def cmd_active(args):
     from ml.active_learning import simulate_active_learning
 
     synth, real = load_docs(args)
-    docs = synth + real
+    # With real data, the pool and test set are real-only: 'which real doc
+    # should a human label next' is the question that matters in production.
+    docs = real if real else synth
     n_test = len(docs) // 5
     results = simulate_active_learning(docs[n_test:], docs[:n_test])
     out = ROOT / "data" / "models" / "active_learning_curves.json"
@@ -116,7 +150,7 @@ def cmd_fit(args):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["compare", "ablation", "visual", "active", "fit"])
+    ap.add_argument("command", choices=["compare", "ablation", "visual", "active", "fit", "gap"])
     ap.add_argument("--docs", type=int, default=300)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--real", help="directory of labeled real-doc JSONs")
@@ -126,4 +160,4 @@ if __name__ == "__main__":
     ap.add_argument("--epochs", type=int, default=10)
     args = ap.parse_args()
     {"compare": cmd_compare, "ablation": cmd_ablation, "visual": cmd_visual,
-     "active": cmd_active, "fit": cmd_fit}[args.command](args)
+     "active": cmd_active, "fit": cmd_fit, "gap": cmd_gap}[args.command](args)

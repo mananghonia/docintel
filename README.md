@@ -116,15 +116,38 @@ simulation exists to test exactly that once real data lands.
 
 INT8 quantization: **3.9× faster at p95, 3.9× smaller, −0.0035 F1**.
 
-## Real data
+## Real data: the gap, measured
 
-Synthetic-only models shatter on reality; everything above is a controlled
-experiment, not a product claim. Two paths to real labels:
+150 real scanned receipts (CORD v2, `scripts/import_real.py cord`), three
+training regimes, one real test set (`scripts/train.py gap`):
 
-- `python scripts/import_real.py cord --limit 150` — CORD v2 receipts from
-  HuggingFace (amount fields map onto our schema).
-- The review UI itself is the labeling tool: upload real invoices, correct
-  them, then `python scripts/import_real.py export-verified`.
+| Training data | Field macro-F1 on real docs |
+|---------------|------------------------------|
+| synthetic only | **0.11** — shatters, as predicted |
+| real only (100 docs) | 0.40 |
+| synthetic + real | **0.43** |
+
+"Synthetic-only models shatter on reality" is a measurement here, not a
+slogan: 0.11 vs 0.43. Synthetic data still earns +0.03 as pretraining on
+top of real labels. (CORD is receipts, so only the amount fields map onto
+the invoice schema — per-field numbers are what matter.)
+
+Active learning on the real pool is *inconclusive at this scale*: with a
+120-doc pool, a 30-doc test set and one seed, the strategy curves cross
+inside the noise band. The synthetic study shows the mechanism; validating
+it on real data needs several hundred docs and multiple seeds — documented
+here so nobody mistakes one noisy run for a result.
+
+**The OCR upload path** (tesseract) is exercised end to end: a rotated,
+blurred, noisy scan produced mangled tokens, the GSTIN checksum penalty cut
+that field's confidence to 0.30, and the document routed to review instead
+of being silently accepted — the failure path working as designed.
+Preprocessing lesson learned the measured way: median filtering + a fixed
+binarisation threshold destroyed thin strokes (65 OCR tokens → 6); tesseract
+binarises internally, so preprocessing now only does autocontrast + deskew.
+
+To label your own invoices, the review UI is the tool: upload, correct,
+then `python scripts/import_real.py export-verified`.
 
 `--real DIR` mixes in hand-labeled real documents (Document-dict JSONs);
 evaluation then becomes **real-only** — synthetic-only models shatter on
