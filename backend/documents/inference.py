@@ -38,10 +38,41 @@ def champion_available() -> bool:
 def predict_document(doc: Document) -> tuple[list[str], np.ndarray, str]:
     """Returns (tags, probs, engine): engine in {remote, champion, baseline}."""
     if settings.MODEL_SERVER_URL:
-        return _predict_remote(doc)
-    if champion_available():
-        return _predict_champion(doc)
-    return _predict_baseline(doc)
+        tags, probs, engine = _predict_remote(doc)
+    elif champion_available():
+        tags, probs, engine = _predict_champion(doc)
+    else:
+        return _predict_baseline(doc)
+    # The champion is trained on synthetic GST invoices and misses fields on
+    # out-of-distribution real invoices (different label wording, layout,
+    # currency). The rule extractor keys on regex/anchors and is layout-
+    # robust, so use it to backfill fields the champion found nowhere.
+    return _merge_rules(doc, tags, probs, engine)
+
+
+def _merge_rules(doc: Document, tags, probs, engine):
+    """Fill fields the champion missed entirely with rule-based predictions.
+
+    Only fields absent from the champion output are backfilled, at a modest
+    fixed confidence so they surface but still route to human review. The
+    champion's own spans are never overwritten.
+    """
+    from ml.baseline import predict as baseline_predict
+    from ml.labeling import tag_field
+
+    champ_fields = {tag_field(t) for t in tags if t != "O"}
+    rule_tags = baseline_predict(doc)
+    merged = list(tags)
+    probs = np.asarray(probs, dtype=np.float64).copy()
+    filled = False
+    for i, rt in enumerate(rule_tags):
+        rf = tag_field(rt)
+        if rf and rf not in champ_fields and merged[i] == "O":
+            merged[i] = rt
+            probs[i] = 0.0
+            probs[i, TAG2ID[rt]] = 0.55  # detected by rules; review it
+            filled = True
+    return merged, probs, (engine + "+rules" if filled else engine)
 
 
 def _predict_baseline(doc: Document):
