@@ -41,7 +41,9 @@ def _hash_token(text: str) -> int:
 def _doc_tensors(doc: Document, torch):
     from ml.features import featurize_document
 
-    feats = torch.tensor(featurize_document(doc))
+    # context=False: shape+geometry only. Context must come from recurrence —
+    # that's what the RNN/LSTM/BiLSTM comparison is measuring.
+    feats = torch.tensor(featurize_document(doc, context=False))
     ids = torch.tensor([_hash_token(t.text) for t in doc.tokens], dtype=torch.long)
     tags = torch.tensor([TAG2ID[t.tag] for t in doc.tokens], dtype=torch.long)
     return feats, ids, tags
@@ -116,7 +118,7 @@ class SequenceTagger:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self._net.parameters(), 5.0)
                 opt.step()
-                total += float(loss)
+                total += loss.item()
             if verbose:
                 msg = f"[{self.rnn_type}] epoch {epoch + 1}/{self.epochs} loss {total / len(data):.4f}"
                 if val_docs:

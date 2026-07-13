@@ -60,11 +60,71 @@ Real uploads need `tesseract` (+ `poppler` for PDFs) on PATH.
 ## Experiments
 
 ```bash
-python scripts/train.py compare            # 6-model GroupKFold table
-python scripts/train.py ablation           # RNN vs LSTM vs BiLSTM (needs torch)
-python scripts/train.py active             # label-efficiency curves — the money slide
+python scripts/train.py compare --hard     # 6-model GroupKFold table
+python scripts/train.py ablation --hard    # RNN vs LSTM vs BiLSTM (needs torch)
+python scripts/train.py visual --hard      # BiLSTM vs BiLSTM+CNN (Tier 3)
+python scripts/train.py active --hard      # label-efficiency curves — the money slide
 python scripts/train.py fit                # train + calibrate, write champion.joblib
+python scripts/benchmark_onnx.py           # torch vs ONNX fp32 vs ONNX INT8
 ```
+
+`--hard` switches the generator to what scanned invoices actually look like:
+8 vendor template families on a Zipf distribution (layouts cluster; the tail
+is rare), label-above layouts that break same-line anchors, distractor
+fields (quotation no, delivery date, IRN, bank a/c), OCR character
+corruption, anchor-token dropout, bbox jitter. On easy data everything
+saturates ≥0.94 F1 and comparisons are meaningless.
+
+## Results (hard synthetic, field macro-F1, GroupKFold by document)
+
+| Tier | Model | Field F1 |
+|------|-------|----------|
+| 0 | Regex + keyword anchors | 0.37 (0.72 on easy data — anchors shatter) |
+| 1 | Naive Bayes | 0.53 |
+| 1 | KNN | 0.73 |
+| 1 | XGBoost / LogReg / LinearSVM | 0.77 |
+| 1 | Random Forest | 0.81 |
+| 2 | vanilla RNN | 0.74 |
+| 2 | LSTM | 0.73 |
+| 2 | **BiLSTM** | **0.77** |
+| 3 | **BiLSTM + CNN visual stream** | **0.78** |
+
+Reading the table honestly: Tier 1 models receive hand-engineered context
+(±2-token window, keyword-anchor distances); Tier 2/3 receive **context-free
+per-token features only** and must learn context through recurrence. The
+BiLSTM matching XGBoost while learning its own context — and the visual
+stream adding +2.7 points on top — is the point. (First lesson learned the
+hard way: feeding the context window TO the sequence models made the
+RNN/LSTM/BiLSTM comparison completely flat; the architecture only matters
+when it has a job to do.)
+
+**Active learning** (XGBoost, seed 20 docs, batch 10): random sampling
+plateaus at ~0.70 after 100 labels; least-confidence reaches the same F1
+with ~50 — **half the labeling budget**. Margin+diversity *underperforms*
+plain margin on this data: with only 8 layout families, KMeans-forced
+cluster coverage wastes budget on already-easy templates. Diversity should
+pay off when layouts number in the hundreds (real vendors), and the
+simulation exists to test exactly that once real data lands.
+
+**Serving** (BiLSTM, single CPU thread, per document):
+
+| Engine | p50 | p95 | p99 | Field F1 | Size |
+|--------|-----|-----|-----|----------|------|
+| torch eager | 3.2ms | 4.3ms | 4.6ms | 0.7753 | — |
+| ONNX fp32 | 2.5ms | 3.0ms | 3.2ms | 0.7753 | 1.34 MB |
+| ONNX INT8 | 1.0ms | 1.1ms | 1.1ms | 0.7718 | 0.35 MB |
+
+INT8 quantization: **3.9× faster at p95, 3.9× smaller, −0.0035 F1**.
+
+## Real data
+
+Synthetic-only models shatter on reality; everything above is a controlled
+experiment, not a product claim. Two paths to real labels:
+
+- `python scripts/import_real.py cord --limit 150` — CORD v2 receipts from
+  HuggingFace (amount fields map onto our schema).
+- The review UI itself is the labeling tool: upload real invoices, correct
+  them, then `python scripts/import_real.py export-verified`.
 
 `--real DIR` mixes in hand-labeled real documents (Document-dict JSONs);
 evaluation then becomes **real-only** — synthetic-only models shatter on
@@ -77,6 +137,7 @@ reality, and knowing that is part of the point.
 | 0    | Regex + keyword anchors                 | `ml/baseline.py`        |
 | 1    | ~150 engineered features → RF / XGBoost | `ml/features.py`, `ml/models_classical.py` |
 | 2    | RNN → LSTM → BiLSTM tagger (ablation)   | `ml/models_bilstm.py`   |
+| 3    | + CNN visual stream on token crops      | `ml/models_cnn.py`      |
 
 Plus the pieces that make confidence mean something:
 

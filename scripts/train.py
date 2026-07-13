@@ -23,7 +23,7 @@ def load_docs(args):
     from ml.labeling import Document, assign_labels
     from ml.synth.generator import generate_dataset
 
-    synth = generate_dataset(args.docs, seed=args.seed)
+    synth = generate_dataset(args.docs, seed=args.seed, hard=args.hard)
     for d in synth:
         assign_labels(d)
     real = []
@@ -54,6 +54,15 @@ def cmd_ablation(args):
         n_test = args.docs // 5
         train, test = synth[n_test:], synth[:n_test]
     run_ablation(train, test, epochs=args.epochs)
+
+
+def cmd_visual(args):
+    from ml.models_cnn import run_visual_ablation
+
+    synth, real = load_docs(args)
+    docs = synth + real
+    n_test = len(docs) // 5
+    run_visual_ablation(docs[n_test:], docs[:n_test], epochs=args.epochs)
 
 
 def cmd_active(args):
@@ -107,12 +116,14 @@ def cmd_fit(args):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", choices=["compare", "ablation", "active", "fit"])
+    ap.add_argument("command", choices=["compare", "ablation", "visual", "active", "fit"])
     ap.add_argument("--docs", type=int, default=300)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--real", help="directory of labeled real-doc JSONs")
+    ap.add_argument("--hard", action="store_true",
+                    help="hard synthetic data: template families, OCR noise, distractors")
     ap.add_argument("--fast", action="store_true")
     ap.add_argument("--epochs", type=int, default=10)
     args = ap.parse_args()
-    {"compare": cmd_compare, "ablation": cmd_ablation,
+    {"compare": cmd_compare, "ablation": cmd_ablation, "visual": cmd_visual,
      "active": cmd_active, "fit": cmd_fit}[args.command](args)

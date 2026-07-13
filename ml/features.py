@@ -96,11 +96,19 @@ def _line_ids(doc: Document) -> np.ndarray:
     return line_ids
 
 
-def featurize_document(doc: Document) -> np.ndarray:
-    """Return (n_tokens, n_features) float32 matrix, order = doc.tokens."""
+def featurize_document(doc: Document, context: bool = True) -> np.ndarray:
+    """Return (n_tokens, n_features) float32 matrix, order = doc.tokens.
+
+    context=False drops the neighbour window and keyword-anchor families,
+    leaving only per-token shape + geometry (31 features). Sequence models
+    (Tier 2/3) use this: hand-coding context into their input would let a
+    memoryless model fake sequence understanding, and the RNN/LSTM/BiLSTM
+    comparison would measure nothing.
+    """
     n = len(doc.tokens)
     if n == 0:
-        return np.zeros((0, len(FEATURE_NAMES)), dtype=np.float32)
+        width = len(FEATURE_NAMES) if context else _N_SHAPE + len(GEOM_NAMES)
+        return np.zeros((0, width), dtype=np.float32)
 
     pw, ph = max(doc.page_width, 1), max(doc.page_height, 1)
     line_ids = _line_ids(doc)
@@ -130,6 +138,10 @@ def featurize_document(doc: Document) -> np.ndarray:
             float(pos_in_line == len(members) - 1),
             tok.ocr_conf,
         ]
+
+        if not context:
+            rows.append(np.concatenate([shape[i], geom]))
+            continue
 
         # Context: shape features of the 2 tokens left and right on the line,
         # zeros past the boundary.
