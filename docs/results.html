@@ -1,0 +1,276 @@
+<title>DocIntel — Results</title>
+<style>
+  :root {
+    --surface-1: #fcfcfb; --page: #f9f9f7;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --baseline: #c3c2b7; --border: rgba(11,11,11,0.10);
+    --s1: #2a78d6; --s2: #1baf7a; --s3: #eda100; --s4: #008300;
+    --seq0: #9ec5f4; --seq1: #3987e5; --seq2: #256abf; --seq3: #184f95;
+    --good: #006300; --good-mark: #0ca30c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-1: #1a1a19; --page: #0d0d0d;
+      --text-primary: #ffffff; --text-secondary: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --baseline: #383835; --border: rgba(255,255,255,0.10);
+      --s1: #3987e5; --s2: #199e70; --s3: #c98500; --s4: #008300;
+      --seq0: #6da7ec; --seq1: #3987e5; --seq2: #256abf; --seq3: #184f95;
+      --good: #0ca30c; --good-mark: #0ca30c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface-1: #1a1a19; --page: #0d0d0d;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --baseline: #383835; --border: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #199e70; --s3: #c98500; --s4: #008300;
+    --seq0: #6da7ec; --seq1: #3987e5; --seq2: #256abf; --seq3: #184f95;
+    --good: #0ca30c; --good-mark: #0ca30c;
+  }
+  :root[data-theme="light"] {
+    --surface-1: #fcfcfb; --page: #f9f9f7;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --baseline: #c3c2b7; --border: rgba(11,11,11,0.10);
+    --s1: #2a78d6; --s2: #1baf7a; --s3: #eda100; --s4: #008300;
+    --seq0: #9ec5f4; --seq1: #3987e5; --seq2: #256abf; --seq3: #184f95;
+    --good: #006300; --good-mark: #0ca30c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 20px 64px; }
+  header h1 { font-size: 1.7rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  header p { color: var(--text-secondary); margin: 0 0 24px; max-width: 60ch; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: 12px; margin-bottom: 32px; }
+  .kpi { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .kpi b { display: block; font-size: 1.6rem; letter-spacing: -0.02em; }
+  .kpi span { color: var(--text-secondary); font-size: .82rem; }
+  .kpi .up { color: var(--good); }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; margin-bottom: 20px; }
+  .card h2 { font-size: 1.05rem; margin: 0 0 2px; }
+  .card .sub { color: var(--text-secondary); font-size: .86rem; margin: 0 0 16px; }
+  .take { color: var(--text-secondary); font-size: .86rem; margin: 12px 0 0; border-top: 1px solid var(--grid); padding-top: 10px; }
+  .take b { color: var(--text-primary); font-weight: 600; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 10px; font-size: .8rem; color: var(--text-secondary); }
+  .legend i { display: inline-block; width: 22px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  text { font-family: system-ui, sans-serif; }
+  .axlab { fill: var(--muted); font-size: 11px; }
+  .val { fill: var(--text-primary); font-size: 11.5px; font-weight: 600; }
+  .name { fill: var(--text-secondary); font-size: 11.5px; }
+  .foot { color: var(--muted); font-size: .78rem; margin-top: 28px; text-align: center; }
+  .scroll { overflow-x: auto; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>DocIntel — invoice extraction that improves itself</h1>
+    <p>BIO sequence-labeling from a rule baseline up to a BiLSTM+CNN, wrapped in the
+       production ML machinery that's usually skipped: confidence calibration, active
+       learning, a champion/challenger gate, and drift detection. Every number below is
+       measured, including the ones where the fancy model loses.</p>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="card">
+    <h2>1 · The model ladder</h2>
+    <p class="sub">Field macro-F1 on hard synthetic invoices, GroupKFold by document. Colour = tier.</p>
+    <div id="ladder"></div>
+    <p class="take"><b>Random Forest on engineered features (0.86) beats every neural model here.</b>
+       At a few-hundred-document scale the sequence models can't pay for themselves — and
+       multi-seed error bars show the RNN/LSTM/BiLSTM gaps are within noise.</p>
+  </div>
+
+  <div class="card">
+    <h2>2 · The self-improving loop, on real data</h2>
+    <p class="sub">Feed 150 real invoices → retrain through the champion/challenger gate on a frozen real holdout.</p>
+    <div id="loop"></div>
+    <p class="take"><b>Real corrections in, a measurably better and better-calibrated model out.</b>
+       Promoted only after a paired-bootstrap significance test on the held-out documents.</p>
+  </div>
+
+  <div class="card">
+    <h2>3 · Active learning — label efficiency</h2>
+    <p class="sub">XGBoost, seed 20 docs, batch 10, averaged over 3 seeds. Field-F1 vs. number of labels.</p>
+    <div class="legend" id="al-legend"></div>
+    <div id="al"></div>
+    <p class="take"><b>Least-confidence sampling reaches random's 100-label plateau with ~40 labels — ~60% less labeling.</b>
+       Margin+diversity underperforms here: with only 8 layout families, forced cluster
+       coverage wastes budget (it should pay off with real vendor variety).</p>
+  </div>
+
+  <div class="card">
+    <h2>4 · Serving — ONNX INT8 quantization</h2>
+    <p class="sub">BiLSTM, single CPU thread, per-document latency. Lower is better.</p>
+    <div id="onnx"></div>
+    <p class="take"><b>INT8: 3.9× faster at p95 (4.3 ms → 1.1 ms), 3.9× smaller (1.34 MB → 0.35 MB), −0.004 F1.</b></p>
+  </div>
+
+  <p class="foot">DocIntel · github.com/mananghonia/docintel · all figures reproduced from
+     <code>scripts/{smoke_test,train,benchmark_onnx,seed_real}.py</code></p>
+</div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const el = (t, a = {}) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+// ---- KPIs ----
+[
+  ["0.99", "field confidence on a clean invoice", "up"],
+  ["+0.16", "real-invoice F1 after one real retrain", "up"],
+  ["3.9×", "faster serving via ONNX INT8", ""],
+  ["~60%", "fewer labels via active learning", ""],
+  ["30", "automated tests, green", ""],
+].forEach(([v, l, c]) => {
+  const d = document.createElement("div"); d.className = "kpi";
+  d.innerHTML = `<b class="${c}">${v}</b><span>${l}</span>`;
+  document.getElementById("kpis").appendChild(d);
+});
+
+// ---- Chart 1: horizontal bars, coloured by tier ----
+function ladder() {
+  const data = [
+    ["Rules (T0)", 0.38, 0], ["Naive Bayes (T1)", 0.56, 1], ["KNN (T1)", 0.78, 1],
+    ["XGBoost (T1)", 0.81, 1], ["LogReg (T1)", 0.82, 1], ["Random Forest (T1)", 0.86, 1],
+    ["RNN (T2)", 0.79, 2], ["LSTM (T2)", 0.80, 2], ["BiLSTM (T2)", 0.79, 2],
+    ["BiLSTM+CNN (T3)", 0.82, 3],
+  ];
+  const seq = ["--seq0", "--seq1", "--seq2", "--seq3"];
+  const W = 900, rowH = 30, padL = 150, padR = 52, padT = 8, padB = 24;
+  const H = padT + data.length * rowH + padB;
+  const x = v => padL + v * (W - padL - padR);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
+  for (let g = 0; g <= 1; g += 0.2) {
+    const gx = x(g);
+    svg.appendChild(el("line", { x1: gx, y1: padT, x2: gx, y2: H - padB, stroke: cssv("--grid"), "stroke-width": 1 }));
+    const t = el("text", { x: gx, y: H - padB + 15, "text-anchor": "middle", class: "axlab" }); t.textContent = g.toFixed(1); svg.appendChild(t);
+  }
+  data.forEach(([name, v, tier], i) => {
+    const y = padT + i * rowH + 5, bh = rowH - 12;
+    svg.appendChild(el("rect", { x: padL, y, width: Math.max(x(v) - padL, 3), height: bh, rx: 4, fill: cssv(seq[tier]) }));
+    const nm = el("text", { x: padL - 10, y: y + bh / 2 + 4, "text-anchor": "end", class: "name" }); nm.textContent = name; svg.appendChild(nm);
+    const vl = el("text", { x: x(v) + 7, y: y + bh / 2 + 4, class: "val" }); vl.textContent = v.toFixed(2); svg.appendChild(vl);
+  });
+  document.getElementById("ladder").appendChild(svg);
+  // tier legend
+  const leg = document.createElement("div"); leg.className = "legend";
+  ["Tier 0 · rules", "Tier 1 · classical", "Tier 2 · RNN/LSTM/BiLSTM", "Tier 3 · +CNN"].forEach((t, i) => {
+    const s = document.createElement("span"); s.innerHTML = `<i style="background:${cssv(seq[i])}"></i>${t}`; leg.appendChild(s);
+  });
+  document.getElementById("ladder").insertBefore(leg, svg);
+}
+
+// ---- Chart 2: before -> after dumbbell ----
+function loop() {
+  const rows = [
+    ["Real-invoice field-F1", 0.405, 0.567, "higher is better", v => v.toFixed(3)],
+    ["Calibration error (ECE)", 0.058, 0.026, "lower is better", v => v.toFixed(3)],
+  ];
+  const W = 900, rowH = 78, padL = 200, padR = 120, padT = 20, padB = 30;
+  const H = padT + rows.length * rowH + padB;
+  const lo = 0, hi = 0.6, x = v => padL + (v - lo) / (hi - lo) * (W - padL - padR);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
+  for (let g = 0; g <= 0.6; g += 0.1) {
+    const gx = x(g);
+    svg.appendChild(el("line", { x1: gx, y1: padT, x2: gx, y2: H - padB, stroke: cssv("--grid"), "stroke-width": 1 }));
+    const t = el("text", { x: gx, y: H - padB + 15, "text-anchor": "middle", class: "axlab" }); t.textContent = g.toFixed(1); svg.appendChild(t);
+  }
+  rows.forEach(([name, a, b, note, fmt], i) => {
+    const y = padT + i * rowH + rowH / 2 - 8;
+    const nm = el("text", { x: padL - 16, y: y - 2, "text-anchor": "end", class: "name" }); nm.textContent = name; svg.appendChild(nm);
+    const nt = el("text", { x: padL - 16, y: y + 14, "text-anchor": "end", class: "axlab" }); nt.textContent = note; svg.appendChild(nt);
+    svg.appendChild(el("line", { x1: x(a), y1: y, x2: x(b), y2: y, stroke: cssv("--baseline"), "stroke-width": 2 }));
+    // before
+    svg.appendChild(el("circle", { cx: x(a), cy: y, r: 6, fill: cssv("--surface-1"), stroke: cssv("--muted"), "stroke-width": 2 }));
+    const av = el("text", { x: x(a), y: y - 14, "text-anchor": "middle", class: "axlab" }); av.textContent = fmt(a); svg.appendChild(av);
+    // after (improvement = good)
+    svg.appendChild(el("circle", { cx: x(b), cy: y, r: 7, fill: cssv("--good-mark"), stroke: cssv("--surface-1"), "stroke-width": 2 }));
+    const bv = el("text", { x: x(b), y: y - 14, "text-anchor": "middle", class: "val" }); bv.textContent = fmt(b); svg.appendChild(bv);
+    const delta = el("text", { x: W - padR + 14, y: y + 4, class: "val", fill: cssv("--good") });
+    delta.textContent = (b - a >= 0 ? "+" : "") + (b - a).toFixed(3); svg.appendChild(delta);
+  });
+  // start/end legend
+  const leg = document.createElement("div"); leg.className = "legend";
+  leg.innerHTML = `<span><i style="background:${cssv("--muted")};border-radius:50%;width:10px;height:10px"></i>synthetic-trained champion</span>`
+    + `<span><i style="background:${cssv("--good-mark")};border-radius:50%;width:10px;height:10px"></i>after real-data retrain</span>`;
+  document.getElementById("loop").appendChild(leg);
+  document.getElementById("loop").appendChild(svg);
+}
+
+// ---- Chart 3: line chart, 4 strategies ----
+function al() {
+  const labels = [20, 30, 40, 50, 60, 70, 80, 90, 100];
+  const series = [
+    ["random", "--s1", [0.648, 0.678, 0.707, 0.702, 0.73, 0.742, 0.733, 0.739, 0.725]],
+    ["least-confidence", "--s2", [0.687, 0.711, 0.76, 0.773, 0.78, 0.795, 0.801, 0.797, 0.796]],
+    ["margin", "--s3", [0.698, 0.714, 0.731, 0.752, 0.778, 0.775, 0.772, 0.792, 0.793]],
+    ["margin+diversity", "--s4", [0.702, 0.749, 0.744, 0.752, 0.766, 0.748, 0.754, 0.751, 0.76]],
+  ];
+  const W = 900, H = 340, padL = 46, padR = 132, padT = 14, padB = 34;
+  const xlo = 20, xhi = 100, ylo = 0.62, yhi = 0.82;
+  const X = v => padL + (v - xlo) / (xhi - xlo) * (W - padL - padR);
+  const Y = v => padT + (1 - (v - ylo) / (yhi - ylo)) * (H - padT - padB);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
+  for (let g = 0.65; g <= 0.80 + 1e-9; g += 0.05) {
+    const gy = Y(g);
+    svg.appendChild(el("line", { x1: padL, y1: gy, x2: W - padR, y2: gy, stroke: cssv("--grid"), "stroke-width": 1 }));
+    const t = el("text", { x: padL - 8, y: gy + 4, "text-anchor": "end", class: "axlab" }); t.textContent = g.toFixed(2); svg.appendChild(t);
+  }
+  labels.forEach(l => { const t = el("text", { x: X(l), y: H - padB + 16, "text-anchor": "middle", class: "axlab" }); t.textContent = l; svg.appendChild(t); });
+  const xl = el("text", { x: (padL + W - padR) / 2, y: H - 2, "text-anchor": "middle", class: "axlab" }); xl.textContent = "documents labeled"; svg.appendChild(xl);
+  // random plateau reference
+  const plat = 0.74;
+  svg.appendChild(el("line", { x1: padL, y1: Y(plat), x2: W - padR, y2: Y(plat), stroke: cssv("--muted"), "stroke-width": 1, "stroke-dasharray": "3 4" }));
+  series.forEach(([name, cv, ys]) => {
+    let d = ""; ys.forEach((v, i) => d += (i ? "L" : "M") + X(labels[i]) + " " + Y(v) + " ");
+    svg.appendChild(el("path", { d, fill: "none", stroke: cssv(cv), "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    ys.forEach((v, i) => svg.appendChild(el("circle", { cx: X(labels[i]), cy: Y(v), r: 2.5, fill: cssv(cv) })));
+  });
+  // End labels, de-collided: sort by y and enforce a minimum vertical gap.
+  const ends = series.map(([name, cv, ys]) => ({ name, cv, y: Y(ys[ys.length - 1]) }))
+    .sort((a, b) => a.y - b.y);
+  const gap = 15;
+  for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < gap) ends[i].y = ends[i - 1].y + gap;
+  ends.forEach(e => {
+    const lbl = el("text", { x: W - padR + 8, y: e.y + 4, class: "val", fill: cssv(e.cv) });
+    lbl.textContent = e.name; svg.appendChild(lbl);
+  });
+  document.getElementById("al").appendChild(svg);
+  const leg = document.getElementById("al-legend");
+  series.forEach(([name, cv]) => { const s = document.createElement("span"); s.innerHTML = `<i style="background:${cssv(cv)}"></i>${name}`; leg.appendChild(s); });
+}
+
+// ---- Chart 4: ONNX latency bars ----
+function onnx() {
+  const data = [
+    ["torch eager", 3.22, 4.30, 4.59, "1.34 MB"],
+    ["ONNX fp32", 2.45, 2.96, 3.23, "1.34 MB"],
+    ["ONNX INT8", 0.97, 1.09, 1.11, "0.35 MB"],
+  ];
+  const W = 900, rowH = 52, padL = 120, padR = 150, padT = 10, padB = 26;
+  const H = padT + data.length * rowH + padB;
+  const hi = 5, x = v => padL + v / hi * (W - padL - padR);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
+  for (let g = 0; g <= 5; g++) {
+    const gx = x(g);
+    svg.appendChild(el("line", { x1: gx, y1: padT, x2: gx, y2: H - padB, stroke: cssv("--grid"), "stroke-width": 1 }));
+    const t = el("text", { x: gx, y: H - padB + 15, "text-anchor": "middle", class: "axlab" }); t.textContent = g; svg.appendChild(t);
+  }
+  const xl = el("text", { x: (padL + W - padR) / 2, y: H - 2, "text-anchor": "middle", class: "axlab" }); xl.textContent = "latency (ms)"; svg.appendChild(xl);
+  data.forEach(([name, p50, p95, p99, size], i) => {
+    const y = padT + i * rowH + 8, bh = rowH - 24;
+    const best = i === 2;
+    svg.appendChild(el("rect", { x: padL, y, width: Math.max(x(p95) - padL, 3), height: bh, rx: 4, fill: cssv(best ? "--seq1" : "--seq0") }));
+    const nm = el("text", { x: padL - 10, y: y + bh / 2 + 4, "text-anchor": "end", class: "name" }); nm.textContent = name; svg.appendChild(nm);
+    const vl = el("text", { x: x(p95) + 8, y: y + bh / 2 + 4, class: "val" });
+    vl.textContent = `p95 ${p95} ms · p50 ${p50} · ${size}`; svg.appendChild(vl);
+  });
+  document.getElementById("onnx").appendChild(svg);
+}
+
+ladder(); loop(); al(); onnx();
+</script>

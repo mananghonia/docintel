@@ -6,6 +6,11 @@ and **retrains itself on those corrections** — measurably improving over time.
 
 The extraction is table stakes. The self-improving loop is the project.
 
+**[→ Results dashboard](docs/results.html)** — the model ladder, the real-data
+self-improving loop (real-invoice F1 0.41 → 0.57 after one retrain), active-learning
+label efficiency, and ONNX INT8 serving, all from measured numbers. Open the file
+locally, or serve `docs/` and view in a browser.
+
 ## Architecture
 
 ```
