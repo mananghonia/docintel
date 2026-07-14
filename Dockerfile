@@ -43,9 +43,10 @@ ENV DJANGO_SETTINGS_MODULE=config.settings \
     PYTHONPATH=/app:/app/backend
 
 # Bake a champion model into the image so the demo extracts on the first
-# request (broadened synthetic: Indian + US/EU invoices). Collect Django's own
-# static (admin/DRF); the SPA itself is served from frontend/dist.
-RUN python scripts/train.py fit --docs 400 --hard && \
+# request (broadened synthetic: Indian + US/EU invoices). 1200 docs is the
+# sweet spot — field-F1 plateaus after ~1000 and build stays fast. Collect
+# Django's own static (admin/DRF); the SPA itself is served from frontend/dist.
+RUN python scripts/train.py fit --docs 1200 --hard && \
     python backend/manage.py collectstatic --noinput
 
 COPY scripts/docker-entrypoint.sh /entrypoint.sh

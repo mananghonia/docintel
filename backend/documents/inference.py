@@ -149,6 +149,93 @@ def _predict_remote(doc: Document):
 # tags+probs -> reviewable field list
 # ---------------------------------------------------------------------------
 
+# Generic company words that, ALONE, are a useless extraction (the model chopped
+# the proper name off the front). Used only to detect a fragment worth repairing.
+_NAME_SUFFIX = {
+    "inc", "inc.", "llc", "ltd", "ltd.", "corp", "corp.", "corporation", "co",
+    "co.", "gmbh", "s.a.", "pvt", "llp", "opco", "&", "and",
+    "sons", "solutions", "industries", "technologies", "enterprises", "traders",
+    "exports", "textiles", "electricals", "logistics", "software", "systems",
+    "labs", "group", "holdings", "services", "ventures", "retail", "commerce",
+    "hotels", "manufacturing", "pharma", "foods", "automobiles", "wholesale",
+    "mart",
+}
+
+
+def _name_like(text: str) -> bool:
+    t = text.strip()
+    if not t or t.endswith(":") or t.replace(",", "").replace(".", "").isdigit():
+        return False
+    if t.lower() in _NAME_SUFFIX:
+        return True
+    return t[0].isupper() and any(c.isalpha() for c in t)
+
+
+def _repair_name_spans(doc: Document, spans: dict, tags: list[str]) -> None:
+    """Grow vendor_name/buyer_name spans to the full same-line run of name-like
+    tokens around the model's seed span (fixes fragmented company names)."""
+    from ml.labeling import tag_field
+
+    if not any(f in spans for f in ("vendor_name", "buyer_name")):
+        return
+    order = sorted(range(len(doc.tokens)),
+                   key=lambda i: (doc.tokens[i].page, doc.tokens[i].cy, doc.tokens[i].cx))
+    lines: list[list[int]] = []
+    prev = None
+    for i in order:
+        tk = doc.tokens[i]
+        if (prev is not None and tk.page == doc.tokens[prev].page
+                and abs(tk.cy - doc.tokens[prev].cy) < tk.height * 0.6):
+            lines[-1].append(i)
+        else:
+            lines.append([i])
+        prev = i
+    idx_of = {id(t): i for i, t in enumerate(doc.tokens)}
+    tf = [tag_field(t) for t in tags]
+
+    for field in ("vendor_name", "buyer_name"):
+        s = spans.get(field)
+        if not s or not s["tokens"]:
+            continue
+        # Only repair a span that is nothing but generic fragments ("Inc.",
+        # "Systems", "& Co") — a useless value the model chopped off the front
+        # of. A span that already contains a proper name is left untouched, so
+        # repair can only help, never break a correct extraction.
+        val_words = [t.text.lower().strip() for t in s["tokens"]]
+        if not val_words or not all(w in _NAME_SUFFIX for w in val_words):
+            continue
+        seed = {idx_of[id(t)] for t in s["tokens"]}
+        line = next((L for L in lines if seed & set(L)), None)
+        if not line:
+            continue
+        positions = sorted(p for p, i in enumerate(line) if i in seed)
+        lo, hi = positions[0], positions[-1]
+
+        def _adjacent(a: int, b: int) -> bool:
+            # Small horizontal gap = same word group; a large gap means a
+            # different column/block (e.g. the meta block sharing this y-band).
+            ta, tb = doc.tokens[a], doc.tokens[b]
+            gap = tb.x0 - ta.x1 if tb.x0 >= ta.x1 else ta.x0 - tb.x1
+            return gap <= 1.5 * max(ta.height, tb.height, 1)
+
+        while lo - 1 >= 0:
+            i = line[lo - 1]
+            if (tf[i] not in (None, field) or not _name_like(doc.tokens[i].text)
+                    or not _adjacent(i, line[lo])):
+                break
+            lo -= 1
+        while hi + 1 < len(line):
+            i = line[hi + 1]
+            if (tf[i] not in (None, field) or not _name_like(doc.tokens[i].text)
+                    or not _adjacent(line[hi], i)):
+                break
+            hi += 1
+        new_idx = line[lo:hi + 1]
+        conf = float(np.mean(s["confs"])) if s["confs"] else 0.5
+        s["tokens"] = [doc.tokens[i] for i in new_idx]
+        s["confs"] = [conf] * len(new_idx)
+
+
 def build_fields(doc: Document, tags: list[str], probs: np.ndarray) -> list[dict]:
     """Group tagged tokens into field spans with value, confidence and bbox,
     then run business-rule postprocessing on values and confidences."""
@@ -176,6 +263,10 @@ def build_fields(doc: Document, tags: list[str], probs: np.ndarray) -> list[dict
 
     spans = {f: max(cands, key=lambda s: float(np.mean(s["confs"])))
              for f, cands in all_spans.items()}
+
+    # Recover company names the model chopped to a bare suffix ("Inc.",
+    # "Systems"): grow that fragment back over the adjacent name tokens.
+    _repair_name_spans(doc, spans, tags)
 
     values = {f: " ".join(t.text for t in s["tokens"]) for f, s in spans.items()}
     confs = {f: float(np.mean(s["confs"])) for f, s in spans.items()}
