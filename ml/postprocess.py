@@ -16,6 +16,10 @@ from datetime import date, datetime
 GSTIN_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 GSTIN_RE = re.compile(r"^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$")
 
+# Document-title words that must never be accepted as a party name.
+_TITLE_WORDS = {"receipt", "invoice", "tax invoice", "bill", "statement",
+                "gst invoice", "estimate", "quotation", "proforma"}
+
 
 # ---------------------------------------------------------------------------
 # GSTIN
@@ -104,7 +108,14 @@ def postprocess_fields(
         flags: list[str] = []
         value: object = raw
 
-        if f.endswith("_gstin"):
+        if f.endswith("_name"):
+            # A name that is just a document-title word ("Receipt", "Invoice")
+            # is a header misfire, not a party name — slash its confidence so
+            # it routes to review instead of showing as a confident answer.
+            if raw.strip().lower().strip(":") in _TITLE_WORDS:
+                flags.append("likely_title_not_name")
+                conf *= 0.25
+        elif f.endswith("_gstin"):
             g = raw.strip().upper().replace(" ", "")
             value = g
             if not validate_gstin(g):

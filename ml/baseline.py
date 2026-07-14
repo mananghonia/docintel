@@ -18,24 +18,29 @@ from ml.postprocess import GSTIN_RE, parse_amount, parse_date
 
 # Keyword anchors, matched case-insensitively against the concatenated line.
 # Order matters: more specific anchors first (e.g. "due date" before "date").
+# Both Indian-GST and US/EU wordings so rules fire on either invoice style.
 ANCHORS: list[tuple[str, str]] = [
     ("due_date", r"\b(due date|payment due|due by)\b"),
-    ("invoice_date", r"\b(invoice date|bill date|dated|date)\b"),
+    ("invoice_date", r"\b(invoice date|bill date|date paid|date of issue|issue date|dated|date)\b"),
     ("invoice_number", r"\b(invoice no|invoice #|inv no|bill number|invoice number)\b"),
-    ("po_number", r"\b(po number|p\.o\. no|purchase order)\b"),
-    ("subtotal", r"\b(subtotal|sub total|taxable value)\b"),
-    ("tax_amount", r"\b(gst \(|tax:|igst|cgst)\b"),
-    ("total_amount", r"\b(grand total|amount payable|total)\b"),
+    ("po_number", r"\b(po number|p\.o\. no|purchase order|po #)\b"),
+    ("subtotal", r"\b(subtotal|sub total|taxable value|total excluding tax)\b"),
+    ("tax_amount", r"\b(gst \(|tax:|tax \(|igst|cgst|sgst|vat|sales tax)\b"),
+    ("total_amount", r"\b(grand total|amount payable|amount due|balance due|amount paid|total due|total)\b"),
     ("currency", r"\b(currency)\b"),
 ]
 
 VALUE_PATTERNS = {
-    "invoice_number": re.compile(r"^[A-Z0-9][A-Z0-9/\-]{2,}$", re.I),
-    "po_number": re.compile(r"^[A-Z0-9][A-Z0-9/\-]{2,}$", re.I),
-    "currency": re.compile(r"^(INR|USD|EUR|GBP|Rs\.?|₹)$", re.I),
+    # Invoice/PO numbers contain at least one digit — stops label words like
+    # "number" from being mistaken for the value.
+    "invoice_number": re.compile(r"^(?=.*\d)[A-Z0-9][A-Z0-9/\-]{2,}$", re.I),
+    "po_number": re.compile(r"^(?=.*\d)[A-Z0-9][A-Z0-9/\-]{2,}$", re.I),
+    "currency": re.compile(r"^(INR|USD|EUR|GBP|Rs\.?|₹|\$|€|£)$", re.I),
 }
 
 GSTIN_TOKEN_RE = re.compile(r"^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$")
+_RE_MONTH = re.compile(
+    r"^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[.,]?$", re.I)
 
 
 def _lines(doc: Document) -> list[list[Token]]:
@@ -53,7 +58,11 @@ def _lines(doc: Document) -> list[list[Token]]:
 def _looks_like_value(field: str, tok: Token) -> bool:
     text = tok.text
     if field.endswith("_date"):
-        return parse_date(text) is not None or bool(re.search(r"\d", text))
+        # A date token is a month word ("June"), or anything with a digit
+        # that isn't obviously not-a-date. This lets "June 30, 2026" be
+        # captured as a span instead of just the numeric fragments.
+        return (parse_date(text) is not None
+                or bool(_RE_MONTH.match(text)) or bool(re.search(r"\d", text)))
     if field in ("subtotal", "tax_amount", "total_amount"):
         return parse_amount(text) is not None
     pat = VALUE_PATTERNS.get(field)
@@ -80,13 +89,17 @@ def predict(doc: Document) -> list[str]:
             m = re.search(pattern, line_text)
             if not m:
                 continue
-            # Anchor found: tag the value-looking tokens to the right of it.
+            # Anchor found: tag value-looking tokens to the right of it. Skip
+            # any token that *starts* inside the matched anchor phrase (tracking
+            # each token's start char avoids the off-by-one that used to pull
+            # the label word "number" into "Invoice number 2TJFPRKM-0008").
             anchor_end_chars = m.end()
-            consumed, begun = 0, False
+            pos, begun = 0, False
             for tok in line:
-                consumed += len(tok.text) + 1
-                if consumed <= anchor_end_chars:
-                    continue  # still inside the anchor phrase
+                tok_start = pos
+                pos += len(tok.text) + 1  # + the joining space
+                if tok_start < anchor_end_chars:
+                    continue  # this token is part of the anchor phrase
                 i = index[id(tok)]
                 if tags[i] != O_TAG:
                     continue

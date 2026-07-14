@@ -59,19 +59,43 @@ ITEM_NAMES = [
 ]
 
 # Label wording variations — the model must key on patterns, not one string.
+# Each field carries both Indian-GST and US/EU wordings so the trained model
+# generalises to invoices like a US SaaS receipt, not just Indian tax invoices.
 LABELS = {
-    "invoice_number": ["Invoice No:", "Invoice #", "Inv No.", "Bill Number:", "Invoice Number:"],
-    "invoice_date": ["Invoice Date:", "Date:", "Dated:", "Bill Date:"],
-    "due_date": ["Due Date:", "Payment Due:", "Due By:"],
-    "po_number": ["PO Number:", "P.O. No:", "Purchase Order:"],
-    "vendor_gstin": ["GSTIN:", "GST No:", "GSTIN/UIN:"],
-    "buyer_gstin": ["Buyer GSTIN:", "GSTIN:", "GST No:"],
-    "subtotal": ["Subtotal:", "Sub Total:", "Taxable Value:"],
-    "tax_amount": ["GST (18%):", "Tax:", "IGST:", "CGST+SGST:"],
-    "total_amount": ["Total:", "Grand Total:", "Amount Payable:", "TOTAL:"],
+    "invoice_number": ["Invoice No:", "Invoice #", "Inv No.", "Bill Number:",
+                       "Invoice Number:", "Invoice number"],
+    "invoice_date": ["Invoice Date:", "Date:", "Dated:", "Bill Date:",
+                     "Date paid", "Date of Issue:", "Issue Date:"],
+    "due_date": ["Due Date:", "Payment Due:", "Due By:", "Payment due"],
+    "po_number": ["PO Number:", "P.O. No:", "Purchase Order:", "PO #"],
+    "vendor_gstin": ["GSTIN:", "GST No:", "GSTIN/UIN:", "Tax ID:", "VAT:"],
+    "buyer_gstin": ["Buyer GSTIN:", "GSTIN:", "GST No:", "Tax ID:"],
+    "subtotal": ["Subtotal:", "Sub Total:", "Taxable Value:", "Subtotal",
+                 "Total excluding tax"],
+    "tax_amount": ["GST (18%):", "Tax:", "IGST:", "CGST+SGST:", "Sales Tax:",
+                   "VAT:", "Tax (18%)"],
+    "total_amount": ["Total:", "Grand Total:", "Amount Payable:", "TOTAL:",
+                     "Amount Due:", "Balance Due:", "Amount Paid", "Total Due:"],
 }
 
+# US/EU vendors and buyers, so vendor_name/buyer_name aren't always Indian.
+INTL_VENDOR_STEMS = ["Northwind", "Contoso", "Umbrella", "Initech", "Globex",
+                     "Hooli", "Vandelay", "Soylent", "Massive Dynamic", "Wonka"]
+INTL_VENDOR_SUFFIXES = ["Inc.", "LLC", "Corp.", "Ltd.", "OpCo, LLC",
+                        "Technologies", "Software Inc.", "GmbH", "S.A."]
+INTL_BUYERS = ["Acme Corporation", "Stark Industries", "Wayne Enterprises",
+               "Cyberdyne Systems", "Aperture Labs", "Tyrell Corp",
+               "Gekko & Co", "Prestige Worldwide"]
+
 DATE_FORMATS = ["%d/%m/%Y", "%d-%m-%Y", "%d %b %Y", "%Y-%m-%d", "%d.%m.%Y"]
+INTL_DATE_FORMATS = ["%B %d, %Y", "%b %d, %Y", "%m/%d/%Y", "%Y-%m-%d"]
+# region -> (currency code, symbol prefixes to sample)
+CURRENCIES = {
+    "in": ("INR", ["Rs. ", "INR ", "₹", ""]),
+    "us": ("USD", ["$", "USD ", ""]),
+    "eu": ("EUR", ["€", "EUR ", ""]),
+    "uk": ("GBP", ["£", "GBP ", ""]),
+}
 
 PAGE_W, PAGE_H = 1240, 1754  # A4 at 150 dpi
 CHAR_W, LINE_H = 10, 26      # crude monospace geometry for token boxes
@@ -118,9 +142,12 @@ def _indian_group(n: float) -> str:
     return f"{whole}.{frac}"
 
 
-def _fmt_amount(v: float, rng: random.Random, hard: bool = False) -> str:
-    s = _indian_group(v) if (hard and rng.random() < 0.5) else f"{v:,.2f}"
-    return rng.choice([s, f"Rs. {s}", f"INR {s}", f"₹{s}"])
+def _fmt_amount(v: float, rng: random.Random, hard: bool = False,
+                symbols: list | None = None) -> str:
+    indian = symbols is None or symbols == CURRENCIES["in"][1]
+    s = _indian_group(v) if (hard and indian and rng.random() < 0.5) else f"{v:,.2f}"
+    prefix = rng.choice(symbols if symbols is not None else CURRENCIES["in"][1])
+    return f"{prefix}{s}"
 
 
 # ---------------------------------------------------------------------------
@@ -311,19 +338,33 @@ def generate_document(seed: int | None = None, hard: bool = False) -> Document:
     def lab(field: str) -> str:
         return LABELS[field][style.label_idx[field]]
 
-    # Same-family docs share a vendor pool: layouts AND names cluster.
-    if hard:
+    # Region: ~half Indian GST, ~half US/EU. Indian invoices carry GSTIN and
+    # ₹ amounts; international ones drop GSTIN, use $/€/£ and US date formats.
+    # Training on both is what lets the model read a US SaaS invoice, not only
+    # an Indian tax invoice.
+    region = rng.choice(["in", "in", "us", "us", "eu", "uk"])
+    is_intl = region != "in"
+    currency, symbols = CURRENCIES[region]
+    date_fmt = rng.choice(INTL_DATE_FORMATS) if is_intl else style.date_fmt
+
+    if is_intl:
+        vendor = f"{rng.choice(INTL_VENDOR_STEMS)} {rng.choice(INTL_VENDOR_SUFFIXES)}"
+        buyer = rng.choice(INTL_BUYERS)
+    elif hard:
         stem = VENDOR_STEMS[(style.family * 2 + rng.randint(0, 1)) % len(VENDOR_STEMS)]
+        vendor = f"{stem} {rng.choice(VENDOR_SUFFIXES)}"
+        buyer = rng.choice(BUYER_NAMES)
     else:
-        stem = rng.choice(VENDOR_STEMS)
-    vendor = f"{stem} {rng.choice(VENDOR_SUFFIXES)}"
-    buyer = rng.choice(BUYER_NAMES)
+        vendor = f"{rng.choice(VENDOR_STEMS)} {rng.choice(VENDOR_SUFFIXES)}"
+        buyer = rng.choice(BUYER_NAMES)
+
     inv_no = _rand_invoice_number(rng)
     inv_date = date(2025, 1, 1) + timedelta(days=rng.randint(0, 500))
     due_date = inv_date + timedelta(days=rng.choice([15, 30, 45, 60]))
+    # GSTIN only exists on Indian invoices.
+    has_gstin = not is_intl
     vendor_gstin, buyer_gstin = _rand_gstin(rng), _rand_gstin(rng)
     po_no = f"PO-{rng.randint(1000, 99999)}"
-    currency = "INR"
 
     n_items = rng.randint(1, 6)
     unit_prices = [round(rng.uniform(50, 20000), 2) for _ in range(n_items)]
@@ -336,27 +377,34 @@ def generate_document(seed: int | None = None, hard: bool = False) -> Document:
     margin = style.margin
     y = rng.randint(40, 90)
 
+    addr_lines = (["MG Road", "Industrial Area", "Ring Road", "Sector 12"]
+                  if not is_intl else
+                  ["Market Street", "5th Avenue", "Main St", "Innovation Way"])
+
     # --- header: vendor block --------------------------------------------
     vx = margin if style.meta_side == "right" else 700
     page.put(vendor, vx, y, field="vendor_name")
     y += LINE_H
-    page.put(f"{rng.randint(1, 400)} {rng.choice(['MG Road', 'Industrial Area', 'Ring Road', 'Sector 12'])}", vx, y)
+    page.put(f"{rng.randint(1, 400)} {rng.choice(addr_lines)}", vx, y)
     y += LINE_H
-    y = page.kv(lab("vendor_gstin"), vendor_gstin, vx, y, "vendor_gstin",
-                style.labels_above)
+    if has_gstin:
+        y = page.kv(lab("vendor_gstin"), vendor_gstin, vx, y, "vendor_gstin",
+                    style.labels_above)
 
     # --- header: invoice meta ---------------------------------------------
     meta_x = 700 if style.meta_side == "right" else margin
     meta_y = rng.randint(40, 90)
-    page.put(rng.choice(["TAX INVOICE", "INVOICE", "GST INVOICE"]), meta_x, meta_y)
+    title = (rng.choice(["INVOICE", "Invoice", "RECEIPT", "Receipt"]) if is_intl
+             else rng.choice(["TAX INVOICE", "INVOICE", "GST INVOICE"]))
+    page.put(title, meta_x, meta_y)
     meta_y += LINE_H
     meta_y = page.kv(lab("invoice_number"), inv_no, meta_x, meta_y,
                      "invoice_number", style.labels_above)
-    meta_y = page.kv(lab("invoice_date"), inv_date.strftime(style.date_fmt),
+    meta_y = page.kv(lab("invoice_date"), inv_date.strftime(date_fmt),
                      meta_x, meta_y, "invoice_date", style.labels_above)
     has_due = rng.random() < style.p_due
     if has_due:
-        meta_y = page.kv(lab("due_date"), due_date.strftime(style.date_fmt),
+        meta_y = page.kv(lab("due_date"), due_date.strftime(date_fmt),
                          meta_x, meta_y, "due_date", style.labels_above)
     has_po = rng.random() < style.p_po
     if has_po:
@@ -364,16 +412,17 @@ def generate_document(seed: int | None = None, hard: bool = False) -> Document:
                          "po_number", style.labels_above)
     # Distractors right in the meta block, where they hurt most.
     for kind in style.distractors[:2]:
-        meta_y = _emit_distractor(kind, page, meta_x, meta_y, rng, style.date_fmt)
+        meta_y = _emit_distractor(kind, page, meta_x, meta_y, rng, date_fmt)
 
     # --- buyer block --------------------------------------------------------
     y = max(y, meta_y) + LINE_H * 2
-    page.put(rng.choice(["Bill To:", "Buyer:", "Billed To:"]), margin, y)
+    page.put(rng.choice(["Bill To:", "Buyer:", "Billed To:", "Bill to"]), margin, y)
     y += LINE_H
     page.put(buyer, margin + 20, y, field="buyer_name")
     y += LINE_H
-    y = page.kv(lab("buyer_gstin"), buyer_gstin, margin + 20, y,
-                "buyer_gstin", style.labels_above)
+    if has_gstin:
+        y = page.kv(lab("buyer_gstin"), buyer_gstin, margin + 20, y,
+                    "buyer_gstin", style.labels_above)
 
     # --- line items ---------------------------------------------------------
     y += LINE_H
@@ -387,13 +436,13 @@ def generate_document(seed: int | None = None, hard: bool = False) -> Document:
     # --- totals block ---------------------------------------------------------
     y += LINE_H
     tx = style.totals_x
-    y = page.kv(lab("subtotal"), _fmt_amount(subtotal, rng, hard), tx, y,
+    y = page.kv(lab("subtotal"), _fmt_amount(subtotal, rng, hard, symbols), tx, y,
                 "subtotal", style.labels_above)
-    y = page.kv(lab("tax_amount"), _fmt_amount(tax, rng, hard), tx, y,
+    y = page.kv(lab("tax_amount"), _fmt_amount(tax, rng, hard, symbols), tx, y,
                 "tax_amount", style.labels_above)
     for kind in style.distractors[2:]:
-        y = _emit_distractor(kind, page, tx, y, rng, style.date_fmt)
-    y = page.kv(lab("total_amount"), _fmt_amount(total, rng, hard), tx, y,
+        y = _emit_distractor(kind, page, tx, y, rng, date_fmt)
+    y = page.kv(lab("total_amount"), _fmt_amount(total, rng, hard, symbols), tx, y,
                 "total_amount", style.labels_above)
     y = page.kv("Currency:", currency, tx, y, "currency", False)
 
@@ -417,14 +466,15 @@ def generate_document(seed: int | None = None, hard: bool = False) -> Document:
             # Truth contains ONLY fields actually rendered on the page: a
             # model cannot extract what isn't printed, and truth entries for
             # unprinted fields silently deflate recall for every model.
+            "region": region,
             "truth": {
                 "invoice_number": inv_no,
                 "invoice_date": inv_date.isoformat(),
                 **({"due_date": due_date.isoformat()} if has_due else {}),
                 "vendor_name": vendor,
-                "vendor_gstin": vendor_gstin,
+                **({"vendor_gstin": vendor_gstin, "buyer_gstin": buyer_gstin}
+                   if has_gstin else {}),
                 "buyer_name": buyer,
-                "buyer_gstin": buyer_gstin,
                 "subtotal": subtotal,
                 "tax_amount": tax,
                 "total_amount": total,
