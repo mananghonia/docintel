@@ -1,7 +1,9 @@
 FROM python:3.11-slim
 
+# tesseract for real image/PDF OCR; libpq/gcc for psycopg2. PDF rendering is
+# PyMuPDF (pip), so poppler is no longer needed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr poppler-utils libpq-dev gcc && rm -rf /var/lib/apt/lists/*
+    tesseract-ocr libpq-dev gcc && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY requirements.txt .

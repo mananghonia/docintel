@@ -1,4 +1,6 @@
-version: "3.9"
+# Full DocIntel stack. NOTE: written and inspected, but not yet run on this
+# machine (no Docker available) — treat the single-service local run in the
+# README as the verified path. Hardened for correct startup ordering.
 
 x-backend-env: &backend-env
   POSTGRES_HOST: postgres
@@ -8,8 +10,15 @@ x-backend-env: &backend-env
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/1
   MODEL_SERVER_URL: http://model-server:8001
+  MLFLOW_TRACKING_URI: http://mlflow:5000
   MODEL_DIR: /models
   MEDIA_ROOT: /media
+  # Demo defaults: DEBUG on so the UI works without a login. To harden, set
+  # DJANGO_DEBUG=0 (then DJANGO_SECRET_KEY is required and REQUIRE_AUTH turns
+  # on automatically — mint a token with `manage.py create_api_token`).
+  DJANGO_DEBUG: "1"
+  DJANGO_SECRET_KEY: "compose-dev-key-change-me"
+  DJANGO_ALLOWED_HOSTS: "*"
 
 services:
   postgres:
@@ -19,9 +28,21 @@ services:
       POSTGRES_USER: docintel
       POSTGRES_PASSWORD: docintel
     volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docintel"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
 
   minio:
     image: minio/minio
@@ -31,12 +52,26 @@ services:
       MINIO_ROOT_PASSWORD: docintel123
     ports: ["9000:9000", "9001:9001"]
     volumes: [miniodata:/data]
+    restart: unless-stopped
 
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
     command: mlflow server --host 0.0.0.0 --port 5000
     ports: ["5000:5000"]
     volumes: [mlflowdata:/mlflow]
+    restart: unless-stopped
+
+  model-server:
+    build: { context: ., dockerfile: model_server/Dockerfile }
+    environment: { MODEL_DIR: /models }
+    volumes: [models:/models]
+    ports: ["8001:8001"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
   backend:
     build: { context: ., dockerfile: backend/Dockerfile }
@@ -44,31 +79,36 @@ services:
     environment: *backend-env
     volumes: [models:/models, media:/media]
     ports: ["8000:8000"]
-    depends_on: [postgres, redis, model-server]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      model-server: { condition: service_started }
+    restart: unless-stopped
 
   worker:
     build: { context: ., dockerfile: backend/Dockerfile }
     command: sh -c "cd backend && celery -A config worker -l info"
     environment: *backend-env
     volumes: [models:/models, media:/media]
-    depends_on: [postgres, redis]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
 
   beat:
     build: { context: ., dockerfile: backend/Dockerfile }
     command: sh -c "cd backend && celery -A config beat -l info"
     environment: *backend-env
-    depends_on: [postgres, redis]
-
-  model-server:
-    build: { context: ., dockerfile: model_server/Dockerfile }
-    environment: { MODEL_DIR: /models }
-    volumes: [models:/models]
-    ports: ["8001:8001"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
 
   frontend:
     build: { context: frontend }
     ports: ["5173:80"]
     depends_on: [backend]
+    restart: unless-stopped
 
 volumes:
   pgdata:

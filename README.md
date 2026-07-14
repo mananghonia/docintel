@@ -237,10 +237,26 @@ numbers above aren't mistaken for more than they are:
 - **`docker-compose.yml` is written but unrun** (no Docker on the dev machine).
   Treat the single-service local run as the verified path; the compose stack
   likely needs the same IPv4/loopback fixes that surfaced locally.
-- **No authentication or multi-tenancy.** Every API endpoint is open; fine for
-  a local/demo deployment, not for exposure to a network.
+- **No multi-tenancy.** Token auth exists (see below) but there's no per-user
+  data isolation — every authenticated user sees every document.
 - **Single-worker assumptions.** The in-process model cache and champion
   hot-reload assume one worker; horizontal scaling needs a shared model store.
+
+## Authentication
+
+Open in local dev, enforced in production. Token + session auth; the API is
+`AllowAny` while `DEBUG` is on and flips to `IsAuthenticated` when you set
+`DJANGO_DEBUG=0` (or `REQUIRE_AUTH=1`). To use it:
+
+```bash
+python backend/manage.py create_api_token --username reviewer --password secret
+# -> prints a token; call the API with  Authorization: Token <token>
+# or exchange credentials:  POST /api/auth/token/  {username, password}
+```
+
+The React client sends the token automatically if one is stored
+(`localStorage.setItem("docintel_token", "<token>")`); with nothing stored it
+sends no header, so local dev stays friction-free.
 
 ## Tests
 

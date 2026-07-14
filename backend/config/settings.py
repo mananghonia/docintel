@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "rest_framework.authtoken",
     "corsheaders",
     "documents",
     "training",
@@ -90,9 +91,22 @@ MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", REPO_ROOT / "data" / "raw"))
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Auth: open in local dev, required once you turn DEBUG off (or set
+# REQUIRE_AUTH=1). Keeps `runserver` + the React dev server friction-free while
+# refusing anonymous access on any network-exposed deployment.
+REQUIRE_AUTH = os.environ.get("REQUIRE_AUTH", "0" if DEBUG else "1") == "1"
+
 REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.TokenAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated" if REQUIRE_AUTH
+        else "rest_framework.permissions.AllowAny",
+    ],
 }
 
 CORS_ALLOW_ALL_ORIGINS = DEBUG

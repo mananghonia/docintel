@@ -153,14 +153,39 @@ def retrain(triggered_by: str = "manual") -> str:
 
 
 def _log_mlflow(model_version, run) -> None:
-    """Best-effort MLflow logging; absence of a tracking server is not an error."""
+    """Log the promoted model to MLflow: params, metrics, and the artifact.
+
+    Best-effort — if MLFLOW_TRACKING_URI is unset or the server is unreachable,
+    log locally to ./mlruns; any failure is swallowed so training never depends
+    on the tracking server being up.
+    """
     try:
+        import os
+
         import mlflow
 
+        uri = os.environ.get("MLFLOW_TRACKING_URI")
+        if uri:
+            mlflow.set_tracking_uri(uri)
+        mlflow.set_experiment("docintel-champion")
+        m = model_version.metrics
         with mlflow.start_run(run_name=f"v{model_version.version}"):
-            mlflow.log_metrics({
-                "field_macro_f1": model_version.metrics["field_macro_f1"],
+            mlflow.log_params({
+                "version": model_version.version,
                 "n_train_docs": run.n_train_docs,
+                "n_holdout_docs": run.n_holdout_docs,
+                "triggered_by": run.triggered_by,
+                "temperature": m.get("temperature"),
             })
+            mlflow.log_metrics({
+                "field_macro_f1": m.get("field_macro_f1", 0.0),
+                "ece_before": m.get("ece_before", 0.0),
+                "ece_after": m.get("ece_after", 0.0),
+                "holdout_win_rate": m.get("holdout_win_rate", 0.0),
+                "champion_f1": run.champion_f1 or 0.0,
+                "challenger_f1": run.challenger_f1 or 0.0,
+            })
+            if os.path.exists(model_version.artifact_path):
+                mlflow.log_artifact(model_version.artifact_path, "model")
     except Exception:  # noqa: BLE001
         pass
