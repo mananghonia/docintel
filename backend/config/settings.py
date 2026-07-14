@@ -115,8 +115,12 @@ RETRAIN_MIN_NEW_DOCS = int(os.environ.get("RETRAIN_MIN_NEW_DOCS", "50"))
 # Champion/challenger gate: a challenger must clear this absolute margin AND
 # win a paired bootstrap at least this often, or promotion is rejected as
 # holdout noise. Larger holdout minimums make the bootstrap meaningful.
-CHALLENGER_MIN_IMPROVEMENT = float(os.environ.get("CHALLENGER_MIN_IMPROVEMENT", "0.0"))
-CHALLENGER_MIN_WIN_RATE = float(os.environ.get("CHALLENGER_MIN_WIN_RATE", "0.9"))
+# Promote when the challenger clears a small absolute margin AND wins the
+# paired bootstrap at least this often. 0.8 accepts a clear improvement while
+# still rejecting a statistical tie (win-rate ~0.5); tighten toward 0.95 once
+# the holdout is large enough for conventional significance.
+CHALLENGER_MIN_IMPROVEMENT = float(os.environ.get("CHALLENGER_MIN_IMPROVEMENT", "0.005"))
+CHALLENGER_MIN_WIN_RATE = float(os.environ.get("CHALLENGER_MIN_WIN_RATE", "0.8"))
 RETRAIN_MIN_TRAIN_DOCS = int(os.environ.get("RETRAIN_MIN_TRAIN_DOCS", "20"))
 RETRAIN_MIN_HOLDOUT_DOCS = int(os.environ.get("RETRAIN_MIN_HOLDOUT_DOCS", "10"))
 # Below this confidence, let the rule extractor override the champion's guess

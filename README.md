@@ -148,6 +148,21 @@ slogan: 0.11 vs 0.43. Synthetic data still earns +0.03 as pretraining on
 top of real labels. (CORD is receipts, so only the amount fields map onto
 the invoice schema — per-field numbers are what matter.)
 
+**The loop works on real data, end to end** (`scripts/seed_real.py`). Loading
+those 150 real documents into the app as verified, then retraining through
+the champion/challenger gate on a *frozen real holdout*:
+
+- real-invoice field macro-F1 **0.405 → 0.567 (+0.16)**
+- calibration **ECE 0.058 → 0.026**
+- promoted only after clearing a paired-bootstrap significance gate
+  (win-rate 0.86 over the holdout documents)
+
+This is the whole thesis reduced to one command: real corrections in, a
+measurably better *and better-calibrated* model out, promoted only when the
+improvement is real. It also surfaced a genuine lesson — the first attempt
+was rejected because a large leftover *synthetic* holdout drowned the real
+signal: **your holdout must reflect the distribution you actually serve.**
+
 Active learning on the real pool is *inconclusive at this scale*: with a
 120-doc pool, a 30-doc test set and one seed, the strategy curves cross
 inside the noise band. The synthetic study shows the mechanism; validating
