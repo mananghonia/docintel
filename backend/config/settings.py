@@ -10,9 +10,22 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BASE_DIR.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-not-secret")
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
-ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",")
+
+# In production (DEBUG off) a real secret must be supplied; we refuse to boot
+# with the throwaway dev key rather than ship a guessable one.
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = "dev-only-not-secret-do-not-use-in-production"
+    else:
+        raise RuntimeError(
+            "DJANGO_SECRET_KEY must be set when DEBUG is off. Generate one with "
+            "`python -c \"from django.core.management.utils import get_random_secret_key as g; print(g())\"`")
+
+# "*" only in debug; production must name its hosts.
+_default_hosts = "*" if DEBUG else "localhost,127.0.0.1"
+ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", _default_hosts).split(",")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -99,4 +112,16 @@ MODEL_SERVER_URL = os.environ.get("MODEL_SERVER_URL", "")  # empty = predict in-
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", REPO_ROOT / "data" / "models"))
 CONFIDENCE_REVIEW_THRESHOLD = float(os.environ.get("CONFIDENCE_REVIEW_THRESHOLD", "0.90"))
 RETRAIN_MIN_NEW_DOCS = int(os.environ.get("RETRAIN_MIN_NEW_DOCS", "50"))
+# Champion/challenger gate: a challenger must clear this absolute margin AND
+# win a paired bootstrap at least this often, or promotion is rejected as
+# holdout noise. Larger holdout minimums make the bootstrap meaningful.
 CHALLENGER_MIN_IMPROVEMENT = float(os.environ.get("CHALLENGER_MIN_IMPROVEMENT", "0.0"))
+CHALLENGER_MIN_WIN_RATE = float(os.environ.get("CHALLENGER_MIN_WIN_RATE", "0.9"))
+RETRAIN_MIN_TRAIN_DOCS = int(os.environ.get("RETRAIN_MIN_TRAIN_DOCS", "20"))
+RETRAIN_MIN_HOLDOUT_DOCS = int(os.environ.get("RETRAIN_MIN_HOLDOUT_DOCS", "10"))
+# Below this confidence, let the rule extractor override the champion's guess
+# (not just fill gaps): the champion is confidently wrong on OOD invoices.
+RULES_OVERRIDE_BELOW = float(os.environ.get("RULES_OVERRIDE_BELOW", "0.60"))
+# Upload guards.
+MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "25"))
+ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}

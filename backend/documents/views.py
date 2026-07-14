@@ -1,3 +1,6 @@
+import os
+
+from django.conf import settings
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -28,6 +31,19 @@ class DocumentViewSet(viewsets.ReadOnlyModelViewSet):
         if not f:
             return Response({"detail": "multipart 'file' required"},
                             status=status.HTTP_400_BAD_REQUEST)
+        # Guard the ingestion surface: an unbounded upload of an arbitrary
+        # file type is a trivial DoS and a route to feeding junk to the OCR.
+        ext = os.path.splitext(f.name)[1].lower()
+        if ext not in settings.ALLOWED_UPLOAD_EXTENSIONS:
+            return Response(
+                {"detail": f"unsupported file type {ext!r}; allowed: "
+                           f"{sorted(settings.ALLOWED_UPLOAD_EXTENSIONS)}"},
+                status=status.HTTP_400_BAD_REQUEST)
+        if f.size > settings.MAX_UPLOAD_MB * 1024 * 1024:
+            return Response(
+                {"detail": f"file too large ({f.size / 1e6:.1f} MB); "
+                           f"limit is {settings.MAX_UPLOAD_MB} MB"},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
         doc = InvoiceDocument.objects.create(file=f, source="upload")
         process_document.delay(str(doc.id))
         return Response(DocumentListSerializer(doc).data,

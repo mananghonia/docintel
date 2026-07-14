@@ -36,7 +36,9 @@ redeploying the app.
 
 ```bash
 python -m venv .venv && .venv/Scripts/activate     # Windows
-pip install -r requirements.txt
+pip install -r requirements.txt                    # fully working core
+# optional: deep-learning tiers (Tier 2/3 + ONNX) — needs the CPU torch index
+pip install -r requirements-dl.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
 # 1. Prove the ML pipeline end to end (synth → features → models → calibration)
 python scripts/smoke_test.py
@@ -110,11 +112,12 @@ hand-engineered context at this data size. On real-scale data (thousands of
 docs, real scan artifacts) the expected ordering may flip — that experiment
 is wired and waiting for data.
 
-**Active learning** (XGBoost, seed 20 docs, batch 10): random sampling
-plateaus at ~0.74 after 100 labels; least-confidence reaches that same F1
-with ~40 labels — **60% less labeling budget** — and keeps climbing to 0.80.
-Margin+diversity *underperforms* plain margin on this data: with only 8
-layout families, KMeans-forced cluster coverage wastes budget on
+**Active learning** (XGBoost, seed 20 docs, batch 10, **averaged over 3
+seeds** — single-seed AL curves cross inside the noise band): random
+sampling plateaus at ~0.74 after 100 labels; least-confidence reaches that
+same F1 with ~40 labels — **~60% less labeling budget** — and keeps climbing
+to 0.80. Margin+diversity *underperforms* plain margin on this data: with
+only 8 layout families, KMeans-forced cluster coverage wastes budget on
 already-easy templates. Diversity should pay off when layouts number in
 the hundreds (real vendors), and the simulation exists to test exactly
 that once real data lands.
@@ -170,20 +173,51 @@ Every one of these was hit for real during development, not imagined:
 | Failure | Symptom | Mitigation |
 |---------|---------|------------|
 | OOD documents | US receipt → `vendor_name="Receipt"` at 1.00 confidence, auto-accepted | critical-field gate: no total/invoice number → review regardless of confidence; PSI drift alert fired correctly |
+| OOD real invoice | champion (synthetic-trained) found 1 of 12 fields on a real US invoice | hybrid extractor: rules backfill fields the champion misses AND override its low-confidence guesses |
 | OCR value corruption | `total=1019067.69` read as `1.0` | unfixable downstream; arithmetic check flags it, reviewer corrects |
 | Overzealous preprocessing | binarise+median destroyed thin strokes, 65 tokens → 6 | measured, removed; tesseract binarises internally |
+| Dense-page rendering | 1806-token research report drawn at fixed 16px = overlapping smear | scale each glyph to its OCR bbox |
 | Anchor dropout | faint print eats the "Total:" label, rules find nothing | learned models key on many signals; rules baseline honestly collapses (0.73 → 0.38) |
 | Truth for unprinted fields | generator claimed due_date even when not rendered → recall deflated for every model | caught by the test suite; truth now only contains rendered fields |
 | Split leakage | token-level splits leak layout, inflate F1 ~10 pts | GroupKFold by document is the only split the harness offers |
+| Promotion on noise | 3-doc holdout, tie promoted a "new" model | paired bootstrap win-rate gate + larger holdout minimum |
 
 Not yet handled (would be next): handwriting, stamps/watermarks over text,
-multi-page invoices with carried-over totals, rotated scans beyond ±4°.
+carried-over totals across pages, rotated scans beyond ±4°.
+
+## Known limitations
+
+Honest inventory of what this project does **not** yet do — stated so the
+numbers above aren't mistaken for more than they are:
+
+- **The learned model does not generalise to real invoices.** The champion is
+  trained on synthetic GST invoices and scores ~0.11 F1 on real receipts; the
+  rule-based hybrid is what makes real uploads usable today. The real fix is
+  labeling a few hundred real invoices through the review UI and retraining —
+  the loop is built and waiting for that data.
+- **No real invoice training set yet.** CORD (the one real dataset wired up)
+  is receipts, so only 3 of 12 fields overlap the schema.
+- **Active-learning superiority is shown only on synthetic data.** Averaged
+  over 3 seeds the ranking is stable there, but on the small real pool the
+  curves still cross within noise — needs several hundred real docs to settle.
+- **`docker-compose.yml` is written but unrun** (no Docker on the dev machine).
+  Treat the single-service local run as the verified path; the compose stack
+  likely needs the same IPv4/loopback fixes that surfaced locally.
+- **No authentication or multi-tenancy.** Every API endpoint is open; fine for
+  a local/demo deployment, not for exposure to a network.
+- **Single-worker assumptions.** The in-process model cache and champion
+  hot-reload assume one worker; horizontal scaling needs a shared model store.
 
 ## Tests
 
 ```bash
-python -m pytest tests -q     # 19 tests: alignment, GSTIN, calibration, eval logic
+python -m pytest tests -q     # 30 tests
 ```
+
+Coverage: bbox→token alignment, GSTIN checksum, date/amount parsing,
+arithmetic consistency, generator determinism, feature shapes, temperature
+scaling, field-scoring logic, the **champion/challenger bootstrap gate**, the
+**rules-merge / best-span inference glue**, and **PSI drift**.
 
 `--real DIR` mixes in hand-labeled real documents (Document-dict JSONs);
 evaluation then becomes **real-only** — synthetic-only models shatter on

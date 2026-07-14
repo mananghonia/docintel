@@ -21,15 +21,27 @@ django-cors-headers>=4.3
 # Model server
 fastapi>=0.110
 uvicorn>=0.29
-onnx>=1.16; python_version < "3.13"
-onnxruntime>=1.17
 
 # Experiment tracking
 mlflow>=2.12
 
-# Deep learning (Tier 2/3) — install separately if you want the BiLSTM/CNN tiers:
-#   pip install torch --index-url https://download.pytorch.org/whl/cpu
-# ml.models_bilstm imports torch lazily and raises a clear error if missing.
-
 # Dev
 pytest>=8.0
+
+# ---------------------------------------------------------------------------
+# This file installs a FULLY WORKING core: rule baseline, all Tier-0/1 models,
+# OCR, synthetic data, backend, model server, tests. Two things live outside
+# it because they need special handling:
+#
+#  - System binary (not pip): Tesseract OCR, for real image/PDF uploads.
+#      Windows:  winget install UB-Mannheim.TesseractOCR
+#      macOS:    brew install tesseract
+#      Debian:   apt-get install tesseract-ocr
+#    Without it, ml.ocr.ocr_available() returns False and only the synthetic /
+#    pre-tokenised path works — the rest of the system is unaffected.
+#
+#  - Deep-learning tiers (Tier 2 BiLSTM, Tier 3 CNN, ONNX benchmark): torch
+#    needs its own index URL, so it is in requirements-dl.txt:
+#      pip install -r requirements-dl.txt
+#    ml.models_bilstm / models_cnn import torch lazily and raise a clear
+#    error if it is missing, so the core stays installable without it.

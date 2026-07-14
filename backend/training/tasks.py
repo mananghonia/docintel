@@ -1,6 +1,8 @@
 """The self-improving loop: retrain on human-verified documents, promote only
 if the challenger beats the champion on a frozen holdout it has never seen."""
 
+import os
+
 from celery import shared_task
 from django.conf import settings
 
@@ -35,9 +37,13 @@ def maybe_retrain() -> str:
 def retrain(triggered_by: str = "manual") -> str:
     import joblib
 
+    import numpy as np
+
     from documents.models import InvoiceDocument
-    from ml.calibration import TemperatureScaler, probs_to_logits
-    from ml.evaluate import evaluate_field_extraction
+    from ml.calibration import (TemperatureScaler, expected_calibration_error,
+                                probs_to_logits)
+    from ml.evaluate import (bootstrap_win_rate, evaluate_field_extraction,
+                             per_document_field_f1)
     from ml.features import featurize_dataset, featurize_document
     from ml.labeling import ID2TAG
     from ml.models_classical import make_models
@@ -51,9 +57,13 @@ def retrain(triggered_by: str = "manual") -> str:
             status=InvoiceDocument.Status.VERIFIED, is_holdout=True))
         run.n_train_docs, run.n_holdout_docs = len(train_docs), len(holdout_docs)
 
-        if len(train_docs) < 10 or len(holdout_docs) < 3:
+        if len(train_docs) < settings.RETRAIN_MIN_TRAIN_DOCS or \
+                len(holdout_docs) < settings.RETRAIN_MIN_HOLDOUT_DOCS:
             run.outcome = TrainingRun.Outcome.SKIPPED
-            run.detail = "not enough verified docs (need 10 train / 3 holdout)"
+            run.detail = (f"not enough verified docs (have {len(train_docs)}"
+                          f"/{len(holdout_docs)}, need "
+                          f"{settings.RETRAIN_MIN_TRAIN_DOCS}/"
+                          f"{settings.RETRAIN_MIN_HOLDOUT_DOCS})")
             run.save()
             return run.detail
 
@@ -66,31 +76,49 @@ def retrain(triggered_by: str = "manual") -> str:
 
         Xv, yv, _ = featurize_dataset(val_docs)
         class_pos = {int(c): i for i, c in enumerate(model.classes_)}
-        import numpy as np
         yv_enc = np.array([class_pos.get(int(t), 0) for t in yv])
-        scaler = TemperatureScaler().fit(probs_to_logits(model.predict_proba(Xv)), yv_enc)
+        val_probs = model.predict_proba(Xv)
+        scaler = TemperatureScaler().fit(probs_to_logits(val_probs), yv_enc)
 
-        # Score challenger and current champion on the FROZEN holdout.
-        def holdout_f1(m) -> float:
-            tag_lists = [[ID2TAG[int(p)] for p in m.predict(featurize_document(d))]
-                         for d in holdout_docs]
-            return evaluate_field_extraction(holdout_docs, tag_lists).macro_f1()
+        # #4: measure calibration honestly — ECE before/after on validation.
+        correct = (val_probs.argmax(axis=1) == yv_enc).astype(float)
+        ece_before = expected_calibration_error(val_probs.max(axis=1), correct)
+        ece_after = expected_calibration_error(
+            scaler.transform(probs_to_logits(val_probs)).max(axis=1), correct)
 
-        challenger_f1 = holdout_f1(model)
+        # Per-document tags on the FROZEN holdout, for a paired bootstrap.
+        def holdout_tags(m):
+            return [[ID2TAG[int(p)] for p in m.predict(featurize_document(d))]
+                    for d in holdout_docs]
+
+        chal_tags = holdout_tags(model)
+        challenger_f1 = evaluate_field_extraction(holdout_docs, chal_tags).macro_f1()
         run.challenger_f1 = challenger_f1
 
         champion_row = ModelVersion.objects.filter(is_champion=True).first()
-        champion_f1 = None
-        if champion_row:
-            champ = joblib.load(champion_row.artifact_path)
-            champion_f1 = holdout_f1(champ["model"])
+        champion_f1, win_rate = None, 1.0
+        # A champion row whose artifact is gone must not block promotion or
+        # crash the run — treat it as "no champion" and let the challenger in.
+        champ_bundle = None
+        if champion_row and os.path.exists(champion_row.artifact_path):
+            champ_bundle = joblib.load(champion_row.artifact_path)
+        if champ_bundle is not None:
+            champ_tags = holdout_tags(champ_bundle["model"])
+            champion_f1 = evaluate_field_extraction(holdout_docs, champ_tags).macro_f1()
+            # #1: don't promote on holdout noise. Require both a margin AND a
+            # paired bootstrap that says the win is unlikely to be chance.
+            win_rate = bootstrap_win_rate(
+                per_document_field_f1(holdout_docs, chal_tags),
+                per_document_field_f1(holdout_docs, champ_tags))
         run.champion_f1 = champion_f1
 
-        if champion_f1 is not None and \
-                challenger_f1 <= champion_f1 + settings.CHALLENGER_MIN_IMPROVEMENT:
+        if champion_f1 is not None and (
+                challenger_f1 <= champion_f1 + settings.CHALLENGER_MIN_IMPROVEMENT
+                or win_rate < settings.CHALLENGER_MIN_WIN_RATE):
             run.outcome = TrainingRun.Outcome.REJECTED
-            run.detail = (f"challenger {challenger_f1:.4f} did not beat "
-                          f"champion {champion_f1:.4f} on frozen holdout")
+            run.detail = (f"challenger {challenger_f1:.4f} vs champion "
+                          f"{champion_f1:.4f} (bootstrap win-rate {win_rate:.2f}) "
+                          f"— not a significant improvement on frozen holdout")
             run.save()
             return run.detail
 
@@ -105,12 +133,15 @@ def retrain(triggered_by: str = "manual") -> str:
             version=version, artifact_path=str(artifact), is_champion=True,
             n_training_docs=len(train_docs),
             metrics={"field_macro_f1": challenger_f1,
-                     "temperature": scaler.temperature},
+                     "temperature": scaler.temperature,
+                     "ece_before": ece_before, "ece_after": ece_after,
+                     "holdout_win_rate": win_rate},
         )
         run.model_version = mv
         run.outcome = TrainingRun.Outcome.PROMOTED
         run.detail = (f"v{version} promoted: {challenger_f1:.4f} vs "
-                      f"{'none' if champion_f1 is None else f'{champion_f1:.4f}'}")
+                      f"{'none' if champion_f1 is None else f'{champion_f1:.4f}'}"
+                      f" (win-rate {win_rate:.2f}, ECE {ece_before:.3f}->{ece_after:.3f})")
         run.save()
         _log_mlflow(mv, run)
         return run.detail

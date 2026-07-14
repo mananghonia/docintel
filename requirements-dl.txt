@@ -1,0 +1,8 @@
+# Deep-learning tiers (Tier 2 BiLSTM, Tier 3 CNN) + ONNX serving benchmark.
+# Install after requirements.txt:
+#     pip install -r requirements-dl.txt --extra-index-url https://download.pytorch.org/whl/cpu
+# The --extra-index-url gets the CPU torch build; drop it for a CUDA machine.
+torch>=2.2
+onnx>=1.16; python_version < "3.13"
+onnxruntime>=1.17
+onnxscript>=0.1   # torch.onnx.export dynamo path needs this

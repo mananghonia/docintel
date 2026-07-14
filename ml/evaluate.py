@@ -45,6 +45,16 @@ class FieldScores:
     fn: dict = dc_field(default_factory=lambda: defaultdict(int))
 
     def add_document(self, truth: dict[str, str], predicted: dict[str, str]) -> None:
+        """Exact-match field scoring. A wrong value counts as BOTH a false
+        positive (a wrong value was emitted) and a false negative (the true
+        value was not produced) — there is no partial credit for a field.
+
+        This is intentionally strict: it penalises precision and recall for
+        the same error, so these F1 numbers are LOWER than token-level or
+        partial-overlap span-F1 and should not be compared to those directly.
+        The threshold that matters operationally is "did the reviewer have to
+        touch this field", and a wrong value fails that just as a miss does.
+        """
         for f in FIELDS:
             has_t, has_p = f in truth and str(truth[f]).strip() != "", f in predicted
             if has_p and has_t:
@@ -97,6 +107,29 @@ def evaluate_field_extraction(docs: list[Document],
 # ---------------------------------------------------------------------------
 # Token-level scoring
 # ---------------------------------------------------------------------------
+
+def per_document_field_f1(docs: list[Document],
+                          predicted_tags: list[list[str]]) -> list[float]:
+    """One field macro-F1 per document — the per-unit statistic a paired
+    bootstrap needs to decide whether one model really beats another."""
+    return [evaluate_field_extraction([d], [t]).macro_f1()
+            for d, t in zip(docs, predicted_tags)]
+
+
+def bootstrap_win_rate(challenger_scores: list[float], champion_scores: list[float],
+                       n_boot: int = 1000, random_state: int = 0) -> float:
+    """Paired bootstrap over documents: fraction of resamples in which the
+    challenger's mean per-doc F1 exceeds the champion's. ~1.0 = confident
+    win, ~0.5 = indistinguishable. Guards against promoting on holdout noise
+    when the holdout is small."""
+    diffs = np.asarray(challenger_scores) - np.asarray(champion_scores)
+    if len(diffs) == 0:
+        return 0.0
+    rng = np.random.RandomState(random_state)
+    means = [rng.choice(diffs, size=len(diffs), replace=True).mean()
+             for _ in range(n_boot)]
+    return float((np.asarray(means) > 0).mean())
+
 
 def token_macro_f1(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Macro-F1 over the tags that actually appear in y_true, excluding O."""

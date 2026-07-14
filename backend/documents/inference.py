@@ -51,27 +51,51 @@ def predict_document(doc: Document) -> tuple[list[str], np.ndarray, str]:
 
 
 def _merge_rules(doc: Document, tags, probs, engine):
-    """Fill fields the champion missed entirely with rule-based predictions.
+    """Combine champion output with the rule extractor.
 
-    Only fields absent from the champion output are backfilled, at a modest
-    fixed confidence so they surface but still route to human review. The
-    champion's own spans are never overwritten.
+    Two cases where the rule tag wins over the champion's:
+    1. The champion produced no token for this field at all (a miss).
+    2. The champion did tag this field somewhere, but only with confidence
+       below RULES_OVERRIDE_BELOW — on out-of-distribution invoices the
+       champion is often confidently wrong on a stray token, so a
+       low-confidence learned guess should defer to the layout-robust rule.
+
+    Rule-supplied tokens get a fixed modest confidence so they always surface
+    for human review. High-confidence champion spans are never overwritten.
     """
     from ml.baseline import predict as baseline_predict
     from ml.labeling import tag_field
 
-    champ_fields = {tag_field(t) for t in tags if t != "O"}
+    # Best champion confidence seen per field (max over its tokens).
+    champ_conf: dict[str, float] = {}
+    for t, p in zip(tags, probs):
+        f = tag_field(t)
+        if f:
+            champ_conf[f] = max(champ_conf.get(f, 0.0), float(np.max(p)))
+
+    override_below = settings.RULES_OVERRIDE_BELOW
     rule_tags = baseline_predict(doc)
     merged = list(tags)
     probs = np.asarray(probs, dtype=np.float64).copy()
     filled = False
     for i, rt in enumerate(rule_tags):
         rf = tag_field(rt)
-        if rf and rf not in champ_fields and merged[i] == "O":
+        if not rf:
+            continue
+        champ_has_confident = champ_conf.get(rf, 0.0) >= override_below
+        if not champ_has_confident and merged[i] == "O":
             merged[i] = rt
             probs[i] = 0.0
             probs[i, TAG2ID[rt]] = 0.55  # detected by rules; review it
             filled = True
+    # Drop any weak champion span the rules replaced, so it doesn't linger
+    # as a duplicate low-confidence guess for the same field.
+    replaced = {tag_field(rt) for rt in rule_tags if tag_field(rt)
+                and champ_conf.get(tag_field(rt), 0.0) < override_below}
+    for i, t in enumerate(tags):
+        f = tag_field(t)
+        if f in replaced and merged[i] == t and float(np.max(probs[i])) < override_below:
+            merged[i] = "O"
     return merged, probs, (engine + "+rules" if filled else engine)
 
 
@@ -131,22 +155,27 @@ def build_fields(doc: Document, tags: list[str], probs: np.ndarray) -> list[dict
     from ml.labeling import tag_field
     from ml.postprocess import postprocess_fields
 
-    spans: dict[str, dict] = {}
+    # Collect every span for each field, then keep the highest-confidence one.
+    # (First-span-wins silently drops a page-2 total when a stray page-1 token
+    # matched, and loses the stronger of two candidate spans.)
+    all_spans: dict[str, list[dict]] = {}
     current: str | None = None
+    cur_span: dict | None = None
     for i, (tok, tag) in enumerate(zip(doc.tokens, tags)):
         f = tag_field(tag)
         if f is None:
-            current = None
+            current, cur_span = None, None
             continue
         fresh = tag.startswith("B-") or f != current
-        if fresh and f in spans:
-            current = None
-            continue  # keep first span only
         if fresh:
-            spans[f] = {"tokens": [], "confs": [], "page": tok.page}
+            cur_span = {"tokens": [], "confs": [], "page": tok.page}
+            all_spans.setdefault(f, []).append(cur_span)
         current = f
-        spans[f]["tokens"].append(tok)
-        spans[f]["confs"].append(float(probs[i].max()))
+        cur_span["tokens"].append(tok)
+        cur_span["confs"].append(float(probs[i].max()))
+
+    spans = {f: max(cands, key=lambda s: float(np.mean(s["confs"])))
+             for f, cands in all_spans.items()}
 
     values = {f: " ".join(t.text for t in s["tokens"]) for f, s in spans.items()}
     confs = {f: float(np.mean(s["confs"])) for f, s in spans.items()}

@@ -119,6 +119,47 @@ def select_batch(
 # The headline experiment: label-efficiency curves
 # ---------------------------------------------------------------------------
 
+def _simulate_one(train_docs, test_docs, strategy, seed_size, batch_size,
+                  n_rounds, random_state):
+    """One AL run of one strategy at one seed. Returns list of per-round F1."""
+    from ml.evaluate import evaluate_field_extraction
+    from ml.features import featurize_dataset, featurize_document
+    from ml.labeling import ID2TAG
+    from ml.models_classical import make_models
+
+    rng = np.random.RandomState(random_state)
+    X_all, y_all, groups = featurize_dataset(train_docs)
+    labeled = list(rng.choice(len(train_docs), size=seed_size, replace=False))
+    curve = []
+    for _ in range(n_rounds + 1):
+        mask = np.isin(groups, labeled)
+        model = make_models(fast=True)["xgboost"]
+        model.fit(X_all[mask], y_all[mask])
+        classes = model.classes_
+        tag_lists = [[ID2TAG[int(p)] for p in model.predict(featurize_document(doc))]
+                     for doc in test_docs]
+        f1 = evaluate_field_extraction(test_docs, tag_lists).macro_f1()
+        curve.append({"n_labeled": len(labeled), "field_f1": f1})
+
+        pool = [i for i in range(len(train_docs)) if i not in labeled]
+        if not pool:
+            break
+        k = min(batch_size, len(pool))
+        if strategy == "random":
+            picked = list(rng.choice(pool, size=k, replace=False))
+        else:
+            acq = "margin" if strategy.startswith("margin") else strategy
+            pool_docs = [train_docs[i] for i in pool]
+            pool_probs = [_expand(model.predict_proba(featurize_document(d)), classes)
+                          for d in pool_docs]
+            local = select_batch(pool_docs, pool_probs, k, acquisition=acq,
+                                 diversity=strategy.endswith("+diversity"),
+                                 random_state=random_state)
+            picked = [pool[i] for i in local]
+        labeled.extend(int(i) for i in picked)
+    return curve
+
+
 def simulate_active_learning(
     train_docs: list[Document],
     test_docs: list[Document],
@@ -126,66 +167,28 @@ def simulate_active_learning(
     seed_size: int = 20,
     batch_size: int = 10,
     n_rounds: int = 8,
-    random_state: int = 0,
+    seeds: tuple = (0, 1, 2),
 ) -> dict[str, list[dict]]:
-    """Simulate AL rounds with an XGBoost tagger; labels already exist, we
-    just reveal them strategy-by-strategy.
+    """Simulate AL rounds with an XGBoost tagger, averaged over `seeds`.
 
-    Returns {strategy: [{n_labeled, field_f1}, ...]} — plot these curves;
-    the gap between random and margin+diversity is the money slide.
+    Averaging is not optional: with one seed the strategy curves cross inside
+    the run-to-run noise band and a single run 'proves' whichever seed was
+    lucky. Returns {strategy: [{n_labeled, f1_mean, f1_std}, ...]}.
     """
-    from ml.evaluate import evaluate_field_extraction
-    from ml.features import featurize_dataset, featurize_document
-    from ml.labeling import ID2TAG
-    from ml.models_classical import make_models
-
-    rng = np.random.RandomState(random_state)
     results: dict[str, list[dict]] = {}
-
-    X_all, y_all, groups = featurize_dataset(train_docs)
-
     for strategy in strategies:
-        labeled = list(rng.choice(len(train_docs), size=seed_size, replace=False))
-        curve: list[dict] = []
-
-        for _ in range(n_rounds + 1):
-            mask = np.isin(groups, labeled)
-            model = make_models(fast=True)["xgboost"]
-            model.fit(X_all[mask], y_all[mask])
-
-            # Model classes may be a subset of tags when few docs are labeled.
-            classes = model.classes_
-
-            tag_lists = []
-            for doc in test_docs:
-                # LabelEncoded wrapper: predict() returns original tag ids.
-                pred = model.predict(featurize_document(doc))
-                tag_lists.append([ID2TAG[int(p)] for p in pred])
-            f1 = evaluate_field_extraction(test_docs, tag_lists).macro_f1()
-            curve.append({"n_labeled": len(labeled), "field_f1": f1})
-
-            pool = [i for i in range(len(train_docs)) if i not in labeled]
-            if not pool:
-                break
-            k = min(batch_size, len(pool))
-            if strategy == "random":
-                picked = list(rng.choice(pool, size=k, replace=False))
-            else:
-                acq = "margin" if strategy.startswith("margin") else strategy
-                pool_docs = [train_docs[i] for i in pool]
-                pool_probs = [model.predict_proba(featurize_document(d))
-                              for d in pool_docs]
-                # predict_proba columns follow model.classes_; expand to full tag space.
-                pool_probs = [_expand(p, classes) for p in pool_probs]
-                local = select_batch(pool_docs, pool_probs, k, acquisition=acq,
-                                     diversity=strategy.endswith("+diversity"),
-                                     random_state=random_state)
-                picked = [pool[i] for i in local]
-            labeled.extend(int(i) for i in picked)
-
+        per_seed = [_simulate_one(train_docs, test_docs, strategy, seed_size,
+                                  batch_size, n_rounds, s) for s in seeds]
+        n = min(len(c) for c in per_seed)
+        curve = []
+        for r in range(n):
+            f1s = [per_seed[si][r]["field_f1"] for si in range(len(seeds))]
+            curve.append({"n_labeled": per_seed[0][r]["n_labeled"],
+                          "f1_mean": float(np.mean(f1s)),
+                          "f1_std": float(np.std(f1s))})
         results[strategy] = curve
-        print(f"{strategy:>20}: " + " ".join(f"{c['field_f1']:.2f}" for c in curve))
-
+        print(f"{strategy:>20}: " +
+              " ".join(f"{c['f1_mean']:.2f}±{c['f1_std']:.2f}" for c in curve))
     return results
 
 
