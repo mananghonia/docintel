@@ -1,8 +1,8 @@
 # Fly.io config for the single-container DocIntel deploy.
 # Change `app` to a globally-unique name, then follow DEPLOY.md.
 
-app = "docintel-demo"        # <-- change to something unique, e.g. docintel-<yourname>
-primary_region = "iad"       # <-- pick a region near you: iad, lhr, fra, sin, bom, ...
+app = "docintel-manan"       # globally-unique app name
+primary_region = "bom"       # Mumbai — closest Fly region to Gujarat
 
 [build]
   dockerfile = "Dockerfile"

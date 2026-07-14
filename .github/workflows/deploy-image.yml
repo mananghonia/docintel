@@ -1,0 +1,51 @@
+name: build-image
+
+# Builds the all-in-one deploy image and pushes it to the GitHub Container
+# Registry (ghcr.io/<owner>/docintel). Runs on GitHub's runners, so no local
+# Docker is needed. The pushed image is what Koyeb (or any host) deploys.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "ml/**"
+      - "backend/**"
+      - "frontend/**"
+      - "scripts/**"
+      - "requirements*.txt"
+      - ".github/workflows/deploy-image.yml"
+  workflow_dispatch: {}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase image name
+        id: img
+        run: echo "name=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.img.outputs.name }}:latest
+            ${{ steps.img.outputs.name }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
