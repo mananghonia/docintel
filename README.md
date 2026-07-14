@@ -63,6 +63,32 @@ Without a Redis broker configured, Celery runs tasks eagerly in-process —
 the whole system works with zero services. `docker-compose up` brings up the
 full stack (Postgres, Redis, MinIO, MLflow, worker, beat, model server).
 
+## Deploy (one container, runs anywhere)
+
+The whole app ships as a **single self-contained image**: Django (gunicorn)
+serves the built React SPA via WhiteNoise, predicts in-process, and runs tasks
+eagerly — no Redis/worker/model-server needed. A champion model is trained at
+build time and baked in, so extraction works on the first request; a few
+synthetic docs are seeded on first boot so the dashboard isn't empty.
+
+```bash
+docker build -t docintel .
+docker run -p 8000:8000 docintel        # open http://localhost:8000
+# or, with persistence (DB + model + uploads survive restarts):
+docker compose -f docker-compose.deploy.yml up --build -d
+```
+
+Demo-open by default (`DEBUG=0`, auth off). To lock it down, set
+`REQUIRE_AUTH=1` and mint a token with `manage.py create_api_token`. On any
+Docker-capable host (a VPS, Fly.io, Render's Docker runtime, Cloud Run) this is
+a one-service deploy; point the host at the `Dockerfile` and expose port 8000.
+For the full multi-service architecture instead, use `docker-compose.yml`.
+
+*(Both compose files and the image are written and verified by inspection and
+by running every build step locally — the Django prod-serving, collectstatic,
+model bake, and gunicorn config — but not yet run inside Docker on this
+machine, which has no Docker daemon.)*
+
 Use **"Ingest 10 synthetic"** in the UI to demo without any real files:
 synthetic invoices carry their own tokens, so no OCR install is needed.
 Real uploads need `tesseract` (+ `poppler` for PDFs) on PATH.

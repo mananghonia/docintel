@@ -18,6 +18,9 @@ celery>=5.3
 redis>=5.0
 django-cors-headers>=4.3
 
+whitenoise>=6.6
+gunicorn>=21.2  # Linux production server (image only; not used on Windows dev)
+
 # Model server
 fastapi>=0.110
 uvicorn>=0.29

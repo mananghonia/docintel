@@ -45,6 +45,9 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # WhiteNoise serves the built React app + hashed assets in production
+    # (right after SecurityMiddleware, per its docs).
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -78,7 +81,9 @@ if os.environ.get("POSTGRES_HOST"):
 else:
     DATABASES = {"default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        # Configurable so a deploy can point it at a mounted volume for
+        # persistence (default keeps it beside the code for local dev).
+        "NAME": os.environ.get("SQLITE_PATH", str(BASE_DIR / "db.sqlite3")),
     }}
 
 LANGUAGE_CODE = "en-us"
@@ -86,6 +91,19 @@ TIME_ZONE = "UTC"
 USE_TZ = True
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"          # collectstatic target (admin/DRF)
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
+}
+# The built React app (frontend/dist). When present, WhiteNoise serves its
+# hashed assets at the site root and a catch-all view (config.urls) returns
+# index.html for client-side routes.
+FRONTEND_DIST = Path(os.environ.get("FRONTEND_DIST", REPO_ROOT / "frontend" / "dist"))
+if FRONTEND_DIST.exists():
+    WHITENOISE_ROOT = str(FRONTEND_DIST)
+WHITENOISE_INDEX_FILE = True
+
 MEDIA_URL = "media/"
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", REPO_ROOT / "data" / "raw"))
 

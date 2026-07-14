@@ -16,3 +16,5 @@ frontend/dist/
 *.pt
 data/labeled/
 data/docile/
+backend/staticfiles/
+staticfiles/
