@@ -79,10 +79,12 @@ docker compose -f docker-compose.deploy.yml up --build -d
 ```
 
 Demo-open by default (`DEBUG=0`, auth off). To lock it down, set
-`REQUIRE_AUTH=1` and mint a token with `manage.py create_api_token`. On any
-Docker-capable host (a VPS, Fly.io, Render's Docker runtime, Cloud Run) this is
-a one-service deploy; point the host at the `Dockerfile` and expose port 8000.
-For the full multi-service architecture instead, use `docker-compose.yml`.
+`REQUIRE_AUTH=1` and mint a token with `manage.py create_api_token`.
+
+**[→ DEPLOY.md](DEPLOY.md)** has a copy-paste Fly.io walkthrough (`fly.toml` is
+in the repo) plus the generic Docker-host path. On any Docker-capable host this
+is a one-service deploy; point it at the `Dockerfile` and expose port 8000. For
+the full multi-service architecture instead, use `docker-compose.yml`.
 
 *(Both compose files and the image are written and verified by inspection and
 by running every build step locally — the Django prod-serving, collectstatic,

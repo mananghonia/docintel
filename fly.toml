@@ -1,0 +1,24 @@
+# Fly.io config for the single-container DocIntel deploy.
+# Change `app` to a globally-unique name, then follow DEPLOY.md.
+
+app = "docintel-demo"        # <-- change to something unique, e.g. docintel-<yourname>
+primary_region = "iad"       # <-- pick a region near you: iad, lhr, fra, sin, bom, ...
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8000"
+  # DEBUG=0 / REQUIRE_AUTH=0 (demo-open) are baked into the image.
+  # DJANGO_SECRET_KEY is set out-of-band with `fly secrets set` (see DEPLOY.md).
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = true      # sleep when idle (free-friendly)
+  auto_start_machines = true     # wake on the next request
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"                  # in-process XGBoost inference is light; 1gb is comfortable
