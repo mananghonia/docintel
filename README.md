@@ -1,5 +1,8 @@
 # DocIntel
 
+**[▶ Live demo](https://docintel-dvze.onrender.com)** · **[Results dashboard](docs/results.html)**
+_(free Render tier — the first request may take ~60s to wake the container)_
+
 Invoice extraction that reads messy documents, outputs structured data with a
 **confidence score per field**, routes uncertain fields to a human reviewer,
 and **retrains itself on those corrections** — measurably improving over time.

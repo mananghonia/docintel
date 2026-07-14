@@ -13,6 +13,9 @@ if [ ! -f "${MODEL_DIR:-/app/data/models}/champion.joblib" ]; then
   python scripts/train.py fit --docs 300 --hard
 fi
 
+# Register the baked champion as a ModelVersion so the dashboard shows it.
+python backend/manage.py register_baked_model || true
+
 # Seed a few synthetic docs so the dashboard isn't empty on a fresh DB.
 if [ "${SEED_DEMO:-1}" = "1" ]; then
   python backend/manage.py bootstrap_demo --n 12 || true
