@@ -56,6 +56,9 @@ cd backend && python manage.py migrate && python manage.py runserver   # :8000
 cd frontend && npm install && npm run dev                              # :5174
 ```
 
+`runserver` (no `--noreload`) auto-reloads on code changes — edit backend code
+and it restarts itself; only `--noreload` needs a manual restart to pick up edits.
+
 Without a Redis broker configured, Celery runs tasks eagerly in-process —
 the whole system works with zero services. `docker-compose up` brings up the
 full stack (Postgres, Redis, MinIO, MLflow, worker, beat, model server).

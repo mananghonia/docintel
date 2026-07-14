@@ -64,6 +64,10 @@ def _looks_like_value(field: str, tok: Token) -> bool:
         return (parse_date(text) is not None
                 or bool(_RE_MONTH.match(text)) or bool(re.search(r"\d", text)))
     if field in ("subtotal", "tax_amount", "total_amount"):
+        # A percentage ("18%", "(18%") is a tax RATE, not an amount — skipping
+        # it lets the following currency amount ("$0.90") be tagged instead.
+        if "%" in text:
+            return False
         return parse_amount(text) is not None
     pat = VALUE_PATTERNS.get(field)
     return bool(pat and pat.match(text))

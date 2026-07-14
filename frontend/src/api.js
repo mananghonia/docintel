@@ -19,6 +19,7 @@ export const api = {
     form.append("file", file);
     return fetch("/api/documents/upload/", { method: "POST", body: form }).then(json);
   },
+  exportDocument: (id) => fetch(`/api/documents/${id}/export/`).then(json),
   submitReview: (id, corrections, reviewSeconds) =>
     fetch(`/api/documents/${id}/review/`, {
       method: "POST",

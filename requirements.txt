@@ -27,6 +27,7 @@ mlflow>=2.12
 
 # Dev
 pytest>=8.0
+pytest-django>=4.8
 
 # ---------------------------------------------------------------------------
 # This file installs a FULLY WORKING core: rule baseline, all Tier-0/1 models,

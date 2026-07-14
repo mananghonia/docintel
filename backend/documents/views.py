@@ -79,6 +79,24 @@ class DocumentViewSet(viewsets.ReadOnlyModelViewSet):
               .order_by("extractions__min_confidence")[:50])
         return Response(DocumentListSerializer(qs, many=True).data)
 
+    @action(detail=True, methods=["get"])
+    def export(self, request, pk=None):
+        """Structured extraction as clean JSON — the machine-readable output
+        of the pipeline (what a downstream system consumes)."""
+        record = self.get_object()
+        ext = record.extractions.first()
+        if ext is None:
+            return Response({"detail": "no extraction yet"},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "document_id": str(record.id),
+            "status": record.status,
+            "model_confidence": {"avg": ext.avg_confidence, "min": ext.min_confidence},
+            "fields": [{"field": f["field"], "value": f["value"],
+                        "confidence": f["confidence"], "flags": f.get("flags", [])}
+                       for f in ext.fields],
+        })
+
     @action(detail=True, methods=["post"])
     def review(self, request, pk=None):
         """Apply a reviewer's corrections: store deltas, rebuild gold

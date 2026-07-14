@@ -45,6 +45,28 @@ export default function Review() {
     navigate("/queue");
   };
 
+  const downloadJson = () => {
+    // Export the current structured extraction (with any edits) as a file.
+    const out = {
+      document_id: doc.id,
+      status: doc.status,
+      fields: fields.map((f) => ({
+        field: f.field,
+        value: edits[f.field] !== undefined ? edits[f.field] : f.value,
+        confidence: f.confidence,
+        flags: f.flags,
+        bbox: f.bbox,
+      })),
+    };
+    const blob = new Blob([JSON.stringify(out, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `docintel-${doc.id.slice(0, 8)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (!doc) return <p>Loading…</p>;
 
   return (
@@ -57,7 +79,10 @@ export default function Review() {
             avg {extraction ? extraction.avg_confidence.toFixed(2) : "—"}
           </small>
         </h2>
-        <button onClick={submit}>Submit review</button>
+        <div style={{ display: "flex", gap: ".5rem" }}>
+          <button className="secondary" onClick={downloadJson}>Download JSON</button>
+          <button onClick={submit}>Submit review</button>
+        </div>
       </div>
 
       <div className="review-layout">
