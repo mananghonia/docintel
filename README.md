@@ -182,9 +182,20 @@ Preprocessing lesson learned the measured way: median filtering + a fixed
 binarisation threshold destroyed thin strokes (65 OCR tokens → 6); tesseract
 binarises internally, so preprocessing now only does autocontrast + deskew.
 
-To label your own invoices, the review UI is the tool: upload, correct,
-then `python scripts/import_real.py export-verified`.
-(CORD JSONs are not committed — CC BY-NC-SA license — rerun the importer.)
+**Getting more real data.** Three importers into the same `data/labeled/` format:
+
+- **DocILE** (`import_real.py docile`) — real invoices mapped onto the full
+  12-field schema, the right dataset to push real-invoice F1 past the CORD
+  ceiling. One-time: get a token at docile.rossum.ai, `pip install
+  docile-benchmark`, run their `download_dataset.sh`, then
+  `python scripts/import_real.py docile --docile-path data/docile`.
+- **CORD** (`import_real.py cord`) — receipts; only amount fields map.
+- **Your own invoices** — upload through the review UI, correct, then
+  `python scripts/import_real.py export-verified`. Best data of all: it
+  specialises the model to exactly what you'll serve.
+
+Then `python scripts/seed_real.py` retrains through the gate on the new data.
+(Downloaded dataset JSONs are gitignored — licenses vary; rerun the importer.)
 
 ## Failure modes, named
 
