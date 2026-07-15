@@ -31,7 +31,6 @@ def _estimate_skew(img: Image.Image, max_angle: float = 4.0, step: float = 0.5) 
 
     small = img.convert("L").resize((min(img.width, 600),
                                      int(img.height * min(img.width, 600) / img.width)))
-    arr0 = 255 - np.asarray(small, dtype=np.float32)
     best_angle, best_score = 0.0, -1.0
     angle = -max_angle
     while angle <= max_angle:

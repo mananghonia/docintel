@@ -14,7 +14,6 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "backend"))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
-import numpy as np
 
 
 def main(n_train=600, n_test=200, epochs=14):

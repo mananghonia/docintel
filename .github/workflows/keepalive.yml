@@ -1,0 +1,30 @@
+name: keepalive
+
+# Pings the live deployment every ~10 min so the free Render instance never
+# sleeps (it spins down after 15 min idle, causing a ~60s cold start). Actions
+# minutes are free on public repos; one always-on free service fits inside
+# Render's ~750 instance-hours/month. Update DEPLOY_URL if the URL changes;
+# delete this file to let the instance sleep again.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+env:
+  DEPLOY_URL: https://docintel-dvze.onrender.com
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep the service awake
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 \
+              "$DEPLOY_URL/api/monitoring/metrics/" || echo 000)
+            echo "ping $i -> HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 20
+          done
+          echo "warning: service did not return 200 (may be mid-redeploy)"

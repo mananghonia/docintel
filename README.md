@@ -151,6 +151,24 @@ hand-engineered context at this data size. On real-scale data (thousands of
 docs, real scan artifacts) the expected ordering may flip — that experiment
 is wired and waiting for data.
 
+### Deployed extraction quality (the full pipeline)
+
+End to end — champion + rules fallback + business-rule post-processing +
+name-span repair — the *deployed* pipeline scores **0.844 field macro-F1** on
+held-out hard invoices (`scripts/model_eval.py`), calibrated to ECE 0.042.
+Per field it ranges from ~1.00 (po_number, currency, invoice_number) down to
+~0.60 for vendor/buyer names — open-vocabulary multi-token names under exact
+match are the genuine ceiling. Two targeted fixes moved the weak fields:
+**name-span repair** (regrow a company name the model chopped to a bare
+suffix like "Inc.") and **date-order features** (which date comes first
+disambiguates invoice vs due date, +0.05 on due_date).
+
+Before reaching for a heavier model, I measured whether one would help:
+`scripts/eval_bilstm.py` (BiLSTM, **0.823**) and `scripts/eval_crf.py` (CRF,
+**0.791**) both score *below* the tuned XGBoost pipeline. So the name ceiling
+is a data problem, not an architecture problem — the honest finding is that a
+fancier model would cost RAM without moving accuracy.
+
 **Active learning** (XGBoost, seed 20 docs, batch 10, **averaged over 3
 seeds** — single-seed AL curves cross inside the noise band): random
 sampling plateaus at ~0.74 after 100 labels; least-confidence reaches that

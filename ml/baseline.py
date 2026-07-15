@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 
 from ml.labeling import Document, O_TAG, Token
-from ml.postprocess import GSTIN_RE, parse_amount, parse_date
+from ml.postprocess import parse_amount, parse_date
 
 # Keyword anchors, matched case-insensitively against the concatenated line.
 # Order matters: more specific anchors first (e.g. "due date" before "date").

@@ -19,7 +19,6 @@ import re
 import numpy as np
 
 from ml.labeling import Document, Token
-from ml.postprocess import parse_amount, parse_date
 
 # Keywords that anchor fields. Lowercase, matched on cleaned token text.
 KEYWORDS = [
