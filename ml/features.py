@@ -114,6 +114,15 @@ def featurize_document(doc: Document, context: bool = True) -> np.ndarray:
     line_ids = _line_ids(doc)
     shape = np.array([_shape_features(t) for t in doc.tokens], dtype=np.float32)
 
+    # Date-order signal: rank each date-like token among all date-like tokens in
+    # reading order. Invoice date is usually the FIRST date, due date a later
+    # one — this disambiguates the two fields the model most often confuses.
+    date_like = [i for i, t in enumerate(doc.tokens)
+                 if _RE_DATEISH.search(t.text) or _RE_MONTH.match(t.text.strip())]
+    ro = sorted(date_like, key=lambda i: (doc.tokens[i].page, doc.tokens[i].cy, doc.tokens[i].cx))
+    date_rank = {i: r / max(len(ro) - 1, 1) for r, i in enumerate(ro)}
+    first_date, last_date = (ro[0], ro[-1]) if ro else (-1, -1)
+
     # Line-level positions.
     line_members: dict[int, list[int]] = {}
     for i, lid in enumerate(line_ids):
@@ -137,6 +146,9 @@ def featurize_document(doc: Document, context: bool = True) -> np.ndarray:
             float(pos_in_line == 0),
             float(pos_in_line == len(members) - 1),
             tok.ocr_conf,
+            date_rank.get(i, 0.0),                   # 0 = first date, 1 = last
+            float(i == first_date),
+            float(i == last_date),
         ]
 
         if not context:
@@ -180,6 +192,7 @@ GEOM_NAMES = [
     "x0_norm", "cy_norm", "cx_norm", "y0_norm", "w_norm", "h_norm",
     "right_half", "top_quarter", "bottom_quarter", "pos_in_line",
     "line_len", "line_first", "line_last", "ocr_conf",
+    "date_rank", "date_first", "date_last",
 ]
 
 FEATURE_NAMES: list[str] = (
