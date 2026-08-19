@@ -1,14 +1,21 @@
 name: keepalive
 
-# Pings the live deployment every ~10 min so the free Render instance never
+# Pings the live deployment every ~5 min so the free Render instance never
 # sleeps (it spins down after 15 min idle, causing a ~60s cold start). Actions
 # minutes are free on public repos; one always-on free service fits inside
 # Render's ~750 instance-hours/month. Update DEPLOY_URL if the URL changes;
 # delete this file to let the instance sleep again.
+#
+# Offset from round minutes (":03, :08, :13, ...") on purpose: GitHub delays
+# or drops scheduled runs under load, and that load concentrates at round
+# times (":00", ":10", ...). Measured drift on the old */10 schedule was
+# ~30 min between actual runs — past Render's 15 min timeout, so cold starts
+# kept happening despite this workflow. A tighter, offset interval leaves
+# margin for the same delays without blowing past the timeout.
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "3-59/5 * * * *"
   workflow_dispatch: {}
 
 env:
