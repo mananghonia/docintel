@@ -63,8 +63,8 @@ cd frontend && npm install && npm run dev                              # :5174
 and it restarts itself; only `--noreload` needs a manual restart to pick up edits.
 
 Without a Redis broker configured, Celery runs tasks eagerly in-process —
-the whole system works with zero services. `docker-compose up` brings up the
-full stack (Postgres, Redis, MinIO, MLflow, worker, beat, model server).
+the whole system works with zero services, which is also how it's deployed
+(see below).
 
 ## Deploy (one container, runs anywhere)
 
@@ -86,13 +86,17 @@ Demo-open by default (`DEBUG=0`, auth off). To lock it down, set
 
 **[→ DEPLOY.md](DEPLOY.md)** has a copy-paste Fly.io walkthrough (`fly.toml` is
 in the repo) plus the generic Docker-host path. On any Docker-capable host this
-is a one-service deploy; point it at the `Dockerfile` and expose port 8000. For
-the full multi-service architecture instead, use `docker-compose.yml`.
+is a one-service deploy; point it at the `Dockerfile` and expose port 8000.
 
-*(Both compose files and the image are written and verified by inspection and
-by running every build step locally — the Django prod-serving, collectstatic,
-model bake, and gunicorn config — but not yet run inside Docker on this
-machine, which has no Docker daemon.)*
+*(This is the only Docker path in the repo, and it's the one actually running
+in production — [live at Render](https://docintel-dvze.onrender.com). An
+earlier multi-service compose file — separate Postgres/Redis/MinIO/MLflow/
+worker/model-server containers — was cut: it was never run on this machine
+(no Docker daemon here) and duplicating an unverified deploy path next to a
+verified one is a worse look than not having it. The multi-service
+*architecture* — Django, Celery worker, FastAPI model server as separate
+concerns — is still real and described above; it's just not exercised via
+Docker Compose today.)*
 
 Use **"Ingest 10 synthetic"** in the UI to demo without any real files:
 synthetic invoices carry their own tokens, so no OCR install is needed.
@@ -283,13 +287,19 @@ numbers above aren't mistaken for more than they are:
 - **Active-learning superiority is shown only on synthetic data.** Averaged
   over 3 seeds the ranking is stable there, but on the small real pool the
   curves still cross within noise — needs several hundred real docs to settle.
-- **`docker-compose.yml` is written but unrun** (no Docker on the dev machine).
-  Treat the single-service local run as the verified path; the compose stack
-  likely needs the same IPv4/loopback fixes that surfaced locally.
-- **No multi-tenancy.** Token auth exists (see below) but there's no per-user
-  data isolation — every authenticated user sees every document.
+- **Per-user document isolation, not per-user models.** Once `REQUIRE_AUTH=1`
+  each user only sees their own uploads (plus shared/seed documents) —
+  `documents.owner`, enforced in `DocumentViewSet.get_queryset`. What's *not*
+  isolated, deliberately: the champion model itself. Corrections from every
+  user pool into one shared retraining loop, because a per-tenant model
+  would need per-tenant data volume this project doesn't have and would
+  undercut the thing being demonstrated — one model getting better from
+  everyone's corrections.
 - **Single-worker assumptions.** The in-process model cache and champion
   hot-reload assume one worker; horizontal scaling needs a shared model store.
+  Deliberate tradeoff for a free-tier demo host, not an oversight — the
+  fix (S3/Redis-backed model cache) is straightforward if this ever needs
+  to scale past one dyno.
 
 ## Authentication
 
@@ -310,7 +320,7 @@ sends no header, so local dev stays friction-free.
 ## Tests
 
 ```bash
-python -m pytest tests -q     # 30 tests
+python -m pytest tests -q     # 43 tests
 ```
 
 Coverage: bbox→token alignment, GSTIN checksum, date/amount parsing,

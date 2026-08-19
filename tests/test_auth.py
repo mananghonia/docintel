@@ -47,3 +47,30 @@ def test_obtain_token_endpoint():
     get_user_model().objects.create_user("bob", password="hunter2")
     r = APIClient().post("/api/auth/token/", {"username": "bob", "password": "hunter2"})
     assert r.status_code == 200 and "token" in r.json()
+
+
+@pytest.mark.django_db
+def test_document_visibility_is_per_owner_when_authenticated():
+    """No multi-tenancy was a known limitation: any authenticated user could
+    see every document. Enforced auth now scopes the list to the caller's
+    own uploads plus ownerless shared/seed documents."""
+    from django.contrib.auth import get_user_model
+    from rest_framework.authtoken.models import Token
+    from documents.models import InvoiceDocument
+
+    User = get_user_model()
+    alice = User.objects.create_user("alice", password="x")
+    bob = User.objects.create_user("bob", password="x")
+    InvoiceDocument.objects.create(source="upload", owner=alice)
+    InvoiceDocument.objects.create(source="upload", owner=bob)
+    InvoiceDocument.objects.create(source="synthetic")  # shared seed doc
+
+    def as_user(user):
+        token = Token.objects.create(user=user)
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        return client
+
+    alice_docs = as_user(alice).get("/api/documents/").json()["results"]
+    assert len(alice_docs) == 2  # her own upload + the shared seed doc
+    assert {d["source"] for d in alice_docs} == {"upload", "synthetic"}

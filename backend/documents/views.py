@@ -1,6 +1,7 @@
 import os
 
 from django.conf import settings
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -23,6 +24,11 @@ class DocumentViewSet(viewsets.ReadOnlyModelViewSet):
         qs = super().get_queryset()
         if s := self.request.query_params.get("status"):
             qs = qs.filter(status=s)
+        # Open dev mode (AllowAny) leaves request.user anonymous — keep it
+        # friction-free and unfiltered. Once auth is enforced, each user sees
+        # their own uploads plus ownerless shared/seed documents.
+        if self.request.user.is_authenticated:
+            qs = qs.filter(Q(owner=self.request.user) | Q(owner__isnull=True))
         return qs
 
     @action(detail=False, methods=["post"])
@@ -44,7 +50,8 @@ class DocumentViewSet(viewsets.ReadOnlyModelViewSet):
                 {"detail": f"file too large ({f.size / 1e6:.1f} MB); "
                            f"limit is {settings.MAX_UPLOAD_MB} MB"},
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
-        doc = InvoiceDocument.objects.create(file=f, source="upload")
+        owner = request.user if request.user.is_authenticated else None
+        doc = InvoiceDocument.objects.create(file=f, source="upload", owner=owner)
         process_document.delay(str(doc.id))
         return Response(DocumentListSerializer(doc).data,
                         status=status.HTTP_201_CREATED)

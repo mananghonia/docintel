@@ -1,10 +1,8 @@
-# Simplest deployment: one container, SQLite + in-process model + eager tasks.
-# Persists the DB, model and uploads in a named volume.
+# The deploy path: one container, SQLite + in-process model + eager tasks.
+# Persists the DB, model and uploads in a named volume. This is what's
+# actually running in production (Render).
 #   docker compose -f docker-compose.deploy.yml up --build -d
 #   open http://localhost:8000
-#
-# For the full multi-service stack (Postgres, Redis, Celery worker, separate
-# model server, MLflow), use docker-compose.yml instead.
 
 services:
   web:

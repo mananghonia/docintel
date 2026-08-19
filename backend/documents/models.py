@@ -1,5 +1,6 @@
 import uuid
 
+from django.conf import settings
 from django.db import models
 
 
@@ -15,6 +16,10 @@ class InvoiceDocument(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     file = models.FileField(upload_to="uploads/%Y/%m/", null=True, blank=True)
     source = models.CharField(max_length=20, default="upload")  # upload|synthetic
+    # Null = shared/seed document (visible to everyone). Set = private to the
+    # uploading user once auth is enforced; open dev mode never filters on it.
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                              on_delete=models.SET_NULL, related_name="documents")
     status = models.CharField(max_length=20, choices=Status.choices,
                               default=Status.UPLOADED)
     # Tokens + geometry + (once verified) gold annotations, as ml.labeling.Document dict.
